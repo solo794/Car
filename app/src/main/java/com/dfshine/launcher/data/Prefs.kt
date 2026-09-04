@@ -44,6 +44,16 @@ class Prefs(context: Context) {
         const val KEY_HVAC_POWER_ACTION = "hvac_power_toggle_action"
         const val KEY_GPS_APP = "gps_target_app"
         const val KEY_MUSIC_WIDGET_DURING_GPS = "music_widget_during_gps"
+
+        const val KEY_HVAC_AUTO_ACTION = "hvac_auto_toggle_action"
+        const val KEY_HVAC_OFF_ACTION = "hvac_off_action"
+        const val KEY_HVAC_VENT_ACTION = "hvac_vent_action"
+        const val KEY_HVAC_DEFROST_ACTION = "hvac_defrost_toggle_action"
+        const val KEY_HVAC_RECIRC_ACTION = "hvac_recirc_toggle_action"
+        const val KEY_HVAC_ASSUMED_TEMP = "hvac_assumed_temp"
+        const val KEY_HVAC_ASSUMED_FAN = "hvac_assumed_fan"
+        const val KEY_HVAC_ASSUMED_AUTO = "hvac_assumed_auto"
+        const val KEY_HVAC_ASSUMED_POWER = "hvac_assumed_power"
     }
 
     private fun putList(key: String, values: List<String>) {
@@ -165,6 +175,46 @@ class Prefs(context: Context) {
     var hvacPowerToggleAction: String?
         get() = sp.getString(KEY_HVAC_POWER_ACTION, null)
         set(value) = sp.edit().putString(KEY_HVAC_POWER_ACTION, value).apply()
+
+    var hvacAutoToggleAction: String?
+        get() = sp.getString(KEY_HVAC_AUTO_ACTION, null)
+        set(value) = sp.edit().putString(KEY_HVAC_AUTO_ACTION, value).apply()
+
+    var hvacOffAction: String?
+        get() = sp.getString(KEY_HVAC_OFF_ACTION, null)
+        set(value) = sp.edit().putString(KEY_HVAC_OFF_ACTION, value).apply()
+
+    var hvacVentAction: String?
+        get() = sp.getString(KEY_HVAC_VENT_ACTION, null)
+        set(value) = sp.edit().putString(KEY_HVAC_VENT_ACTION, value).apply()
+
+    var hvacDefrostToggleAction: String?
+        get() = sp.getString(KEY_HVAC_DEFROST_ACTION, null)
+        set(value) = sp.edit().putString(KEY_HVAC_DEFROST_ACTION, value).apply()
+
+    var hvacRecircToggleAction: String?
+        get() = sp.getString(KEY_HVAC_RECIRC_ACTION, null)
+        set(value) = sp.edit().putString(KEY_HVAC_RECIRC_ACTION, value).apply()
+
+    /** These reflect only what the widget itself has told the car to do
+     *  (it cannot read the real HVAC state back - see [hvacTempUpAction]) -
+     *  they persist so the numbers on screen stay consistent across
+     *  restarts instead of resetting. */
+    var hvacAssumedTemp: Int
+        get() = sp.getInt(KEY_HVAC_ASSUMED_TEMP, 24)
+        set(value) = sp.edit().putInt(KEY_HVAC_ASSUMED_TEMP, value).apply()
+
+    var hvacAssumedFan: Int
+        get() = sp.getInt(KEY_HVAC_ASSUMED_FAN, 2)
+        set(value) = sp.edit().putInt(KEY_HVAC_ASSUMED_FAN, value).apply()
+
+    var hvacAssumedAuto: Boolean
+        get() = sp.getBoolean(KEY_HVAC_ASSUMED_AUTO, true)
+        set(value) = sp.edit().putBoolean(KEY_HVAC_ASSUMED_AUTO, value).apply()
+
+    var hvacAssumedPower: Boolean
+        get() = sp.getBoolean(KEY_HVAC_ASSUMED_POWER, true)
+        set(value) = sp.edit().putBoolean(KEY_HVAC_ASSUMED_POWER, value).apply()
 
     /** Component (package/activity) of the GPS/navigation app (any offline
      *  maps app sideloaded on the unit - Google/GMS-free ones since this

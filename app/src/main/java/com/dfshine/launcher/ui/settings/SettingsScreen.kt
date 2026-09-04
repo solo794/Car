@@ -245,12 +245,12 @@ fun SettingsScreen(
             }
         }
 
-        item { SectionTitle("الشريط السفلي الثابت (التكييف + الملاحة)") }
+        item { SectionTitle("الشريط السفلي الثابت (ودجت التكييف)") }
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     SettingsSwitchRow(
-                        title = "إظهار الشريط دائماً فوق كل التطبيقات",
+                        title = "إظهار ودجت التكييف دائماً فوق كل التطبيقات",
                         checked = prefs.navBarEnabled,
                         onCheckedChange = {
                             prefs.navBarEnabled = it
@@ -264,29 +264,50 @@ fun SettingsScreen(
                         }
                     )
                     Text(
-                        "لا يوجد API عام في أندرويد للتحكم الحقيقي بحرارة/مروحة التكييف - الزر بيفتح شاشة التكييف الأصلية للوكالة مباشرة. لو عندك اسم الـ broadcast اللي بترسله الوحدة لأوامر التكييف (نادر ومختلف حسب كل وحدة)، أدخله تحت وهيبقى فيه أزرار تحكم مباشرة بدون ما تسيب التطبيق المفتوح.",
+                        "الودجت فيه كل الأزرار (حرارة، AUTO/OFF، اتجاه الهواء، تشغيل/إيقاف، إزالة الضباب، تدوير الهواء، سرعة المروحة) زي شريط التكييف الأصلي بتاعك بالظبط. لكن لا يوجد API عام في أندرويد يقرأ أو يغيّر حرارة/مروحة التكييف الحقيقية، فالأرقام الظاهرة في الودجت هي بس اللي إحنا سجّلناها محلياً (مش القيمة الحقيقية في العربية) - إلا لو حطيت اسم الـ broadcast الصحيح لكل زرار تحت، وهيبقى فعلاً بيتحكم في السيارة.",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)
+                    )
+                    Text(
+                        "إزاي تلاقي اسم الـ broadcast الصحيح: وصّل الشاشة بلابتوب عن طريق adb، شغّل \"adb logcat\" وانت بتدوس على أزرار التكييف الأصلية في السيارة، وشوف أي Intent/Action بيظهر في السجل وقت الضغط - انسخه هنا. التفاصيل في README.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 10.dp)
+                    )
+
+                    var tempUp by remember { mutableStateOf(prefs.hvacTempUpAction ?: "") }
+                    var tempDown by remember { mutableStateOf(prefs.hvacTempDownAction ?: "") }
+                    var autoAction by remember { mutableStateOf(prefs.hvacAutoToggleAction ?: "") }
+                    var offAction by remember { mutableStateOf(prefs.hvacOffAction ?: "") }
+                    var ventAction by remember { mutableStateOf(prefs.hvacVentAction ?: "") }
+                    var powerAction by remember { mutableStateOf(prefs.hvacPowerToggleAction ?: "") }
+                    var defrostAction by remember { mutableStateOf(prefs.hvacDefrostToggleAction ?: "") }
+                    var recircAction by remember { mutableStateOf(prefs.hvacRecircToggleAction ?: "") }
+                    var fanUp by remember { mutableStateOf(prefs.hvacFanUpAction ?: "") }
+                    var fanDown by remember { mutableStateOf(prefs.hvacFanDownAction ?: "") }
+
+                    HvacActionField("Broadcast: تبريد أكثر ▲", tempUp, { tempUp = it; prefs.hvacTempUpAction = it })
+                    HvacActionField("Broadcast: تبريد أقل ▼", tempDown, { tempDown = it; prefs.hvacTempDownAction = it })
+                    HvacActionField("Broadcast: وضع AUTO", autoAction, { autoAction = it; prefs.hvacAutoToggleAction = it })
+                    HvacActionField("Broadcast: وضع OFF", offAction, { offAction = it; prefs.hvacOffAction = it })
+                    HvacActionField("Broadcast: اتجاه الهواء 💨", ventAction, { ventAction = it; prefs.hvacVentAction = it })
+                    HvacActionField("Broadcast: تشغيل/إيقاف التكييف ⏻", powerAction, { powerAction = it; prefs.hvacPowerToggleAction = it })
+                    HvacActionField("Broadcast: إزالة الضباب ❄", defrostAction, { defrostAction = it; prefs.hvacDefrostToggleAction = it })
+                    HvacActionField("Broadcast: تدوير الهواء ↻", recircAction, { recircAction = it; prefs.hvacRecircToggleAction = it })
+                    HvacActionField("Broadcast: مروحة أسرع ▲", fanUp, { fanUp = it; prefs.hvacFanUpAction = it })
+                    HvacActionField("Broadcast: مروحة أبطأ ▼", fanDown, { fanDown = it; prefs.hvacFanDownAction = it })
+
+                    Text(
+                        "اختياري: شاشة/تطبيق تكييف منفصل تقدر تفتحه بالكامل (غير الودجت نفسه).",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 6.dp)
                     )
                     OutlinedButton(
                         onClick = { showHvacAppPicker = true },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         val current = prefs.hvacTargetApp?.substringBefore("/")
-                        Text(if (current != null) "شاشة التكييف: $current" else "اختر شاشة/تطبيق التكييف")
+                        Text(if (current != null) "شاشة التكييف الكاملة: $current" else "اختر شاشة/تطبيق تكييف كامل (اختياري)")
                     }
-
-                    var tempUp by remember { mutableStateOf(prefs.hvacTempUpAction ?: "") }
-                    var tempDown by remember { mutableStateOf(prefs.hvacTempDownAction ?: "") }
-                    var fanUp by remember { mutableStateOf(prefs.hvacFanUpAction ?: "") }
-                    var fanDown by remember { mutableStateOf(prefs.hvacFanDownAction ?: "") }
-                    var power by remember { mutableStateOf(prefs.hvacPowerToggleAction ?: "") }
-
-                    HvacActionField("Broadcast: تبريد أكثر (اختياري)", tempUp, { tempUp = it; prefs.hvacTempUpAction = it })
-                    HvacActionField("Broadcast: تبريد أقل (اختياري)", tempDown, { tempDown = it; prefs.hvacTempDownAction = it })
-                    HvacActionField("Broadcast: مروحة أسرع (اختياري)", fanUp, { fanUp = it; prefs.hvacFanUpAction = it })
-                    HvacActionField("Broadcast: مروحة أبطأ (اختياري)", fanDown, { fanDown = it; prefs.hvacFanDownAction = it })
-                    HvacActionField("Broadcast: تشغيل/إيقاف (اختياري)", power, { power = it; prefs.hvacPowerToggleAction = it })
                 }
             }
         }
