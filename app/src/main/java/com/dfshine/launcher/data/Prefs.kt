@@ -142,10 +142,17 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_FIRST_RUN_DONE, false)
         set(value) = sp.edit().putBoolean(KEY_FIRST_RUN_DONE, value).apply()
 
-    /** Persistent bottom bar (AC shortcut + GPS shortcut), always drawn
-     *  over whatever app is in the foreground. */
+    /**
+     * Fallback climate/GPS widget, drawn over whatever app is in the
+     * foreground - OFF by default. The Dongfeng Shine's own climate bar
+     * (temperature/AUTO/fan) is drawn by the system itself, independently
+     * of whichever app is set as the default Home screen, so it should
+     * keep working on its own after installing this launcher without
+     * needing a replacement. Only turn this on if you test on the real
+     * unit and find the native bar actually disappears.
+     */
     var navBarEnabled: Boolean
-        get() = sp.getBoolean(KEY_NAV_BAR_ENABLED, true)
+        get() = sp.getBoolean(KEY_NAV_BAR_ENABLED, false)
         set(value) = sp.edit().putBoolean(KEY_NAV_BAR_ENABLED, value).apply()
 
     /** Component (package/activity) of the OEM climate-control screen. */

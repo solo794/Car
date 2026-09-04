@@ -245,12 +245,22 @@ fun SettingsScreen(
             }
         }
 
-        item { SectionTitle("الشريط السفلي الثابت (ودجت التكييف)") }
+        item { SectionTitle("ودجت التكييف الاحتياطي (Fallback)") }
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
+                    Text(
+                        "شريط التكييف الأصلي بتاع شاشتك (الحرارة/AUTO/المروحة) بترسمه الوحدة نفسها كطبقة نظام مستقلة عن أي تطبيق - مش جزء من اللانشر الأصلي. لهذا السبب المفروض يفضل شغال لوحده حتى بعد تفعيل هذا اللانشر كشاشة رئيسية افتراضية، بدون أي تدخل من هنا.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Text(
+                        "فعّل الودجت اللي تحت بس لو جرّبت على الجهاز الحقيقي ولاحظت إن الشريط الأصلي اختفى فعلاً.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
                     SettingsSwitchRow(
-                        title = "إظهار ودجت التكييف دائماً فوق كل التطبيقات",
+                        title = "إظهار ودجت التكييف الاحتياطي فوق كل التطبيقات",
                         checked = prefs.navBarEnabled,
                         onCheckedChange = {
                             prefs.navBarEnabled = it
