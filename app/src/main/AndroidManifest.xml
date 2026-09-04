@@ -30,6 +30,28 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Detect the foreground app, to auto-position the floating music
+         widget above the map while a GPS app is open -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Built-in Browser (to download offline-map / other APKs - there is
+         no Google Play on this head unit) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Built-in File Manager: browse files copied over USB and install
+         APKs downloaded from the built-in Browser -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- Built-in Music Player (background playback service) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
     <application
         android:name=".LauncherApp"
         android:allowBackup="true"
@@ -84,6 +106,23 @@
                 android:value="steering_wheel_media_keys" />
         </service>
 
+        <!-- Persistent bottom bar: AC + GPS shortcuts, always drawn over
+             whatever app is in the foreground. -->
+        <service
+            android:name=".service.PersistentNavBarService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="persistent_car_nav_bar" />
+        </service>
+
+        <!-- Built-in music player playback service -->
+        <service
+            android:name=".service.MusicPlayerService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <!-- Notification badges on app icons -->
         <service
             android:name=".service.NotificationBadgeService"
@@ -122,6 +161,19 @@
                 <action android:name="android.intent.action.CAR_REVERSE_ON" />
             </intent-filter>
         </receiver>
+
+        <!-- Lets the File Manager and Browser hand a downloaded/opened
+             file to another app (or the system installer for .apk files)
+             as a content:// Uri instead of an unsafe file:// one. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

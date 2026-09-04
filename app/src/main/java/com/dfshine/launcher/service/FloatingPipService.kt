@@ -3,6 +3,8 @@ package com.dfshine.launcher.service
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -25,6 +27,15 @@ import androidx.core.app.NotificationCompat
 import com.dfshine.launcher.LauncherApp
 import com.dfshine.launcher.MainActivity
 import com.dfshine.launcher.R
+import com.dfshine.launcher.data.Prefs
+import com.dfshine.launcher.util.PermissionUtils
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
@@ -47,6 +58,9 @@ class FloatingPipService : Service() {
     private var bubbleView: View? = null
     private var mode: Mode = Mode.NONE
     private var mediaController: MediaController? = null
+    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private var wasInGpsApp = false
+    private var panelPinnedUpperHalf = false
 
     enum class Mode { NONE, MUSIC, CLOCK, QUICK_LAUNCH }
 
@@ -54,13 +68,14 @@ class FloatingPipService : Service() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         startForeground(NOTIFICATION_ID, buildForegroundNotification())
+        startGpsWatcher()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_SHOW_MUSIC -> showPanel(Mode.MUSIC)
-            ACTION_SHOW_CLOCK -> showPanel(Mode.CLOCK)
-            ACTION_SHOW_QUICK_LAUNCH -> showPanel(Mode.QUICK_LAUNCH)
+            ACTION_SHOW_MUSIC -> showPanel(Mode.MUSIC, pinnedUpperHalf = false)
+            ACTION_SHOW_CLOCK -> showPanel(Mode.CLOCK, pinnedUpperHalf = false)
+            ACTION_SHOW_QUICK_LAUNCH -> showPanel(Mode.QUICK_LAUNCH, pinnedUpperHalf = false)
             ACTION_HIDE -> collapseToBubble()
             ACTION_STOP -> stopSelf()
             else -> Unit
@@ -72,15 +87,63 @@ class FloatingPipService : Service() {
 
     override fun onDestroy() {
         removeAllViews()
+        serviceScope.cancel()
         super.onDestroy()
+    }
+
+    // ---------------------------------------------------------------
+    // GPS foreground-app watcher: while the driver has the configured
+    // navigation app open, pin the music widget above the map instead of
+    // leaving it wherever it last was (and collapsed while nothing needs
+    // it) - "فوق نص الشاشة لو ماشي على GPS".
+    // ---------------------------------------------------------------
+
+    private fun startGpsWatcher() {
+        serviceScope.launch {
+            while (isActive) {
+                delay(2000)
+                runCatching { checkGpsForeground() }
+            }
+        }
+    }
+
+    private fun checkGpsForeground() {
+        val prefs = Prefs(this)
+        if (!prefs.musicWidgetDuringGps) return
+        val gpsPackage = prefs.gpsTargetApp?.substringBefore("/") ?: return
+        if (!PermissionUtils.hasUsageAccess(this)) return
+
+        val inGpsApp = currentForegroundPackage() == gpsPackage
+        if (inGpsApp && !wasInGpsApp) {
+            showPanel(Mode.MUSIC, pinnedUpperHalf = true)
+        } else if (!inGpsApp && wasInGpsApp && mode == Mode.MUSIC) {
+            collapseToBubble()
+        }
+        wasInGpsApp = inGpsApp
+    }
+
+    private fun currentForegroundPackage(): String? {
+        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val end = System.currentTimeMillis()
+        val events = usageStatsManager.queryEvents(end - 10_000, end)
+        var lastForeground: String? = null
+        val event = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                lastForeground = event.packageName
+            }
+        }
+        return lastForeground
     }
 
     // ---------------------------------------------------------------
     // Panel lifecycle
     // ---------------------------------------------------------------
 
-    private fun showPanel(newMode: Mode) {
+    private fun showPanel(newMode: Mode, pinnedUpperHalf: Boolean = panelPinnedUpperHalf) {
         mode = newMode
+        panelPinnedUpperHalf = pinnedUpperHalf
         removeBubble()
         removePanel()
 
@@ -94,7 +157,10 @@ class FloatingPipService : Service() {
         val params = overlayParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.TOP or Gravity.START
             x = 24
-            y = 200
+            // Upper half of a tall portrait screen, clear of both the
+            // status bar and (usually) the turn-by-turn banner most nav
+            // apps draw at the very top.
+            y = if (pinnedUpperHalf) (resources.displayMetrics.heightPixels * 0.18).toInt() else 200
         }
 
         makeDraggable(content, params) { removeAllViews() }
@@ -235,7 +301,7 @@ class FloatingPipService : Service() {
         val root = card()
         root.addView(header("إطلاق سريع"))
 
-        val prefs = com.dfshine.launcher.data.Prefs(this)
+        val prefs = Prefs(this)
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER

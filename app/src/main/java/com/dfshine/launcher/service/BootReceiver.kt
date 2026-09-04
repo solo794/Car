@@ -24,22 +24,37 @@ class BootReceiver : BroadcastReceiver() {
         ) return
 
         val prefs = Prefs(context)
-        if (prefs.floatingToolsOnBoot && PermissionUtils.canDrawOverlays(context)) {
-            val serviceIntent = FloatingPipService.intent(context, FloatingPipService.ACTION_SHOW_QUICK_LAUNCH)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ContextCompat.startForegroundService(context, serviceIntent)
+        val canOverlay = PermissionUtils.canDrawOverlays(context)
+
+        // The GPS-foreground watcher (auto-positions the music widget while
+        // navigating) lives inside FloatingPipService, so it needs to be
+        // running even if the driver never explicitly opened a floating
+        // tool - start it quietly (collapsed to a bubble) whenever either
+        // feature that depends on it is enabled.
+        val needsFloatingService = prefs.floatingToolsOnBoot || prefs.musicWidgetDuringGps
+        if (needsFloatingService && canOverlay) {
+            val floatingAction = if (prefs.floatingToolsOnBoot) {
+                FloatingPipService.ACTION_SHOW_QUICK_LAUNCH
             } else {
-                context.startService(serviceIntent)
+                FloatingPipService.ACTION_HIDE
             }
+            startForegroundServiceCompat(context, FloatingPipService.intent(context, floatingAction))
+        }
+
+        if (prefs.navBarEnabled && canOverlay) {
+            startForegroundServiceCompat(context, PersistentNavBarService.startIntent(context))
         }
 
         if (prefs.steeringKeysEnabled) {
-            val mediaServiceIntent = Intent(context, MediaKeyService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ContextCompat.startForegroundService(context, mediaServiceIntent)
-            } else {
-                context.startService(mediaServiceIntent)
-            }
+            startForegroundServiceCompat(context, Intent(context, MediaKeyService::class.java))
+        }
+    }
+
+    private fun startForegroundServiceCompat(context: Context, intent: Intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ContextCompat.startForegroundService(context, intent)
+        } else {
+            context.startService(intent)
         }
     }
 }

@@ -50,10 +50,20 @@ private val ACCENT_PRESETS = listOf(
 )
 
 @Composable
-fun SettingsScreen(viewModel: LauncherViewModel, onBack: () -> Unit, onOpenSplitScreen: () -> Unit) {
+fun SettingsScreen(
+    viewModel: LauncherViewModel,
+    onBack: () -> Unit,
+    onOpenSplitScreen: () -> Unit,
+    onOpenFileManager: () -> Unit,
+    onOpenBrowser: () -> Unit,
+    onOpenMusicPlayer: () -> Unit,
+    onOpenVideoPlayer: () -> Unit
+) {
     val context = LocalContext.current
     val prefs = viewModel.prefs
     var showReverseCameraPicker by remember { mutableStateOf(false) }
+    var showHvacAppPicker by remember { mutableStateOf(false) }
+    var showGpsAppPicker by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().statusBarsPadding(),
@@ -206,6 +216,104 @@ fun SettingsScreen(viewModel: LauncherViewModel, onBack: () -> Unit, onOpenSplit
             }
         }
 
+        item { SectionTitle("GPS والملاحة") }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        "لا توجد خدمات Google على هذه الشاشة، فـ Android Auto الحقيقي (المكوّن اللي بيستقبل من الموبايل) مش ممكن تقنياً هنا. اختر بدل منه تطبيق ملاحة مثبَّت بالفعل (مثل OsmAnd أو Maps.me) عشان يفتح من زر \"الملاحة\" في الشريط السفلي.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedButton(
+                        onClick = { showGpsAppPicker = true },
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                    ) {
+                        val current = prefs.gpsTargetApp?.substringBefore("/")
+                        Text(if (current != null) "تطبيق الملاحة: $current" else "اختر تطبيق الملاحة")
+                    }
+                    SettingsSwitchRow(
+                        title = "إظهار ويدجت الموسيقى فوق نص الشاشة أثناء الملاحة",
+                        checked = prefs.musicWidgetDuringGps,
+                        onCheckedChange = { prefs.musicWidgetDuringGps = it; viewModel.notifySettingsChanged() }
+                    )
+                    PermissionRow(
+                        title = "إذن الوصول لسجل الاستخدام (لمعرفة متى تطبيق الملاحة مفتوح)",
+                        granted = PermissionUtils.hasUsageAccess(context),
+                        onClick = { context.startActivity(PermissionUtils.usageAccessSettingsIntent()) }
+                    )
+                }
+            }
+        }
+
+        item { SectionTitle("الشريط السفلي الثابت (التكييف + الملاحة)") }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    SettingsSwitchRow(
+                        title = "إظهار الشريط دائماً فوق كل التطبيقات",
+                        checked = prefs.navBarEnabled,
+                        onCheckedChange = {
+                            prefs.navBarEnabled = it
+                            viewModel.notifySettingsChanged()
+                            val serviceIntent = com.dfshine.launcher.service.PersistentNavBarService.startIntent(context)
+                            if (it) {
+                                androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
+                            } else {
+                                context.stopService(serviceIntent)
+                            }
+                        }
+                    )
+                    Text(
+                        "لا يوجد API عام في أندرويد للتحكم الحقيقي بحرارة/مروحة التكييف - الزر بيفتح شاشة التكييف الأصلية للوكالة مباشرة. لو عندك اسم الـ broadcast اللي بترسله الوحدة لأوامر التكييف (نادر ومختلف حسب كل وحدة)، أدخله تحت وهيبقى فيه أزرار تحكم مباشرة بدون ما تسيب التطبيق المفتوح.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)
+                    )
+                    OutlinedButton(
+                        onClick = { showHvacAppPicker = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        val current = prefs.hvacTargetApp?.substringBefore("/")
+                        Text(if (current != null) "شاشة التكييف: $current" else "اختر شاشة/تطبيق التكييف")
+                    }
+
+                    var tempUp by remember { mutableStateOf(prefs.hvacTempUpAction ?: "") }
+                    var tempDown by remember { mutableStateOf(prefs.hvacTempDownAction ?: "") }
+                    var fanUp by remember { mutableStateOf(prefs.hvacFanUpAction ?: "") }
+                    var fanDown by remember { mutableStateOf(prefs.hvacFanDownAction ?: "") }
+                    var power by remember { mutableStateOf(prefs.hvacPowerToggleAction ?: "") }
+
+                    HvacActionField("Broadcast: تبريد أكثر (اختياري)", tempUp, { tempUp = it; prefs.hvacTempUpAction = it })
+                    HvacActionField("Broadcast: تبريد أقل (اختياري)", tempDown, { tempDown = it; prefs.hvacTempDownAction = it })
+                    HvacActionField("Broadcast: مروحة أسرع (اختياري)", fanUp, { fanUp = it; prefs.hvacFanUpAction = it })
+                    HvacActionField("Broadcast: مروحة أبطأ (اختياري)", fanDown, { fanDown = it; prefs.hvacFanDownAction = it })
+                    HvacActionField("Broadcast: تشغيل/إيقاف (اختياري)", power, { power = it; prefs.hvacPowerToggleAction = it })
+                }
+            }
+        }
+
+        item { SectionTitle("الأدوات المدمجة") }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        "لا يوجد متجر Google Play على هذه الشاشة - استخدم المتصفح المدمج لتنزيل أي APK (مثل تطبيق خرائط)، ثم مدير الملفات لتثبيته.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 10.dp)
+                    )
+                    BuiltInToolRow("مدير الملفات وتثبيت التطبيقات", onOpenFileManager) {
+                        PermissionRow(
+                            title = "إذن الوصول لكل الملفات",
+                            granted = PermissionUtils.hasAllFilesAccess(context),
+                            onClick = { context.startActivity(PermissionUtils.manageAllFilesIntent(context)) }
+                        )
+                    }
+                    BuiltInToolRow("المتصفح", onOpenBrowser, null)
+                    BuiltInToolRow("مشغل الموسيقى", onOpenMusicPlayer, null)
+                    BuiltInToolRow("مشغل الفيديو", onOpenVideoPlayer, null)
+                }
+            }
+        }
+
         item { SectionTitle("قفل التطبيقات") }
         item {
             Card(Modifier.fillMaxWidth()) {
@@ -302,6 +410,30 @@ fun SettingsScreen(viewModel: LauncherViewModel, onBack: () -> Unit, onOpenSplit
             }
         )
     }
+
+    if (showHvacAppPicker) {
+        AppPickerDialog(
+            title = "اختر شاشة/تطبيق التكييف",
+            apps = viewModel.allApps,
+            onDismiss = { showHvacAppPicker = false },
+            onPick = { app ->
+                prefs.hvacTargetApp = app.key
+                showHvacAppPicker = false
+            }
+        )
+    }
+
+    if (showGpsAppPicker) {
+        AppPickerDialog(
+            title = "اختر تطبيق الملاحة",
+            apps = viewModel.allApps,
+            onDismiss = { showGpsAppPicker = false },
+            onPick = { app ->
+                prefs.gpsTargetApp = app.key
+                showGpsAppPicker = false
+            }
+        )
+    }
 }
 
 @Composable
@@ -322,6 +454,32 @@ private fun SettingsSwitchRow(title: String, checked: Boolean, onCheckedChange: 
     ) {
         Text(title, modifier = Modifier.fillMaxWidth(0.75f))
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun HvacActionField(label: String, value: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    )
+}
+
+@Composable
+private fun BuiltInToolRow(title: String, onOpen: () -> Unit, extra: (@Composable () -> Unit)?) {
+    Column(Modifier.padding(vertical = 6.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, modifier = Modifier.fillMaxWidth(0.7f))
+            OutlinedButton(onClick = onOpen) { Text("فتح") }
+        }
+        extra?.invoke()
     }
 }
 

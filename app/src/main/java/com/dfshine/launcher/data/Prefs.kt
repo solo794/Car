@@ -34,6 +34,16 @@ class Prefs(context: Context) {
         const val KEY_NOTIFICATION_BADGES = "notification_badges_enabled"
         const val KEY_ANIMATIONS_ENABLED = "animations_enabled"
         const val KEY_FIRST_RUN_DONE = "first_run_done"
+
+        const val KEY_NAV_BAR_ENABLED = "nav_bar_enabled"
+        const val KEY_HVAC_APP = "hvac_target_app"
+        const val KEY_HVAC_TEMP_UP_ACTION = "hvac_temp_up_action"
+        const val KEY_HVAC_TEMP_DOWN_ACTION = "hvac_temp_down_action"
+        const val KEY_HVAC_FAN_UP_ACTION = "hvac_fan_up_action"
+        const val KEY_HVAC_FAN_DOWN_ACTION = "hvac_fan_down_action"
+        const val KEY_HVAC_POWER_ACTION = "hvac_power_toggle_action"
+        const val KEY_GPS_APP = "gps_target_app"
+        const val KEY_MUSIC_WIDGET_DURING_GPS = "music_widget_during_gps"
     }
 
     private fun putList(key: String, values: List<String>) {
@@ -121,4 +131,51 @@ class Prefs(context: Context) {
     var firstRunDone: Boolean
         get() = sp.getBoolean(KEY_FIRST_RUN_DONE, false)
         set(value) = sp.edit().putBoolean(KEY_FIRST_RUN_DONE, value).apply()
+
+    /** Persistent bottom bar (AC shortcut + GPS shortcut), always drawn
+     *  over whatever app is in the foreground. */
+    var navBarEnabled: Boolean
+        get() = sp.getBoolean(KEY_NAV_BAR_ENABLED, true)
+        set(value) = sp.edit().putBoolean(KEY_NAV_BAR_ENABLED, value).apply()
+
+    /** Component (package/activity) of the OEM climate-control screen. */
+    var hvacTargetApp: String?
+        get() = sp.getString(KEY_HVAC_APP, null)
+        set(value) = sp.edit().putString(KEY_HVAC_APP, value).apply()
+
+    /** Optional broadcast actions for direct AC commands, if this head
+     *  unit's vendor documents them. When null, the AC tile just brings
+     *  [hvacTargetApp] to the foreground instead. */
+    var hvacTempUpAction: String?
+        get() = sp.getString(KEY_HVAC_TEMP_UP_ACTION, null)
+        set(value) = sp.edit().putString(KEY_HVAC_TEMP_UP_ACTION, value).apply()
+
+    var hvacTempDownAction: String?
+        get() = sp.getString(KEY_HVAC_TEMP_DOWN_ACTION, null)
+        set(value) = sp.edit().putString(KEY_HVAC_TEMP_DOWN_ACTION, value).apply()
+
+    var hvacFanUpAction: String?
+        get() = sp.getString(KEY_HVAC_FAN_UP_ACTION, null)
+        set(value) = sp.edit().putString(KEY_HVAC_FAN_UP_ACTION, value).apply()
+
+    var hvacFanDownAction: String?
+        get() = sp.getString(KEY_HVAC_FAN_DOWN_ACTION, null)
+        set(value) = sp.edit().putString(KEY_HVAC_FAN_DOWN_ACTION, value).apply()
+
+    var hvacPowerToggleAction: String?
+        get() = sp.getString(KEY_HVAC_POWER_ACTION, null)
+        set(value) = sp.edit().putString(KEY_HVAC_POWER_ACTION, value).apply()
+
+    /** Component (package/activity) of the GPS/navigation app (any offline
+     *  maps app sideloaded on the unit - Google/GMS-free ones since this
+     *  head unit has no Google Play Services). */
+    var gpsTargetApp: String?
+        get() = sp.getString(KEY_GPS_APP, null)
+        set(value) = sp.edit().putString(KEY_GPS_APP, value).apply()
+
+    /** Auto-show the floating music widget (pinned to the upper half of
+     *  the screen) whenever [gpsTargetApp] is the foreground app. */
+    var musicWidgetDuringGps: Boolean
+        get() = sp.getBoolean(KEY_MUSIC_WIDGET_DURING_GPS, true)
+        set(value) = sp.edit().putBoolean(KEY_MUSIC_WIDGET_DURING_GPS, value).apply()
 }
