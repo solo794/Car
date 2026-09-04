@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">لانشر شاين</string>
+    <string name="notif_channel_floating">الأدوات العائمة</string>
+    <string name="notif_channel_floating_desc">تشغيل نافذة الكاميرا / المشغل العائم فوق التطبيقات الأخرى</string>
+    <string name="notif_channel_media">مفاتيح المقود</string>
+    <string name="notif_channel_media_desc">التحكم في الوسائط من مفاتيح عجلة القيادة</string>
+</resources>
