@@ -191,8 +191,7 @@ app/src/main/java/com/dfshine/launcher/
 │   ├── NotificationBadgeService.kt # شارات الإشعارات + جلسات الوسائط
 │   ├── BootReceiver.kt           # إعادة تشغيل الأدوات بعد إعادة تشغيل الشاشة
 │   └── ReverseCameraReceiver.kt  # اكتشاف إشارة الرجوع للخلف
-├── splitscreen/SplitScreenHelper.kt
-└── pip/PipLauncher.kt
+└── splitscreen/SplitScreenHelper.kt
 ```
 
 ---

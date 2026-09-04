@@ -1,5 +1,6 @@
 package com.dfshine.launcher.ui.home
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -51,6 +52,7 @@ import kotlin.math.ceil
  * sized for a tall car screen, with a bottom dock and a status strip that
  * opens the Quick Panel when swiped down (or tapped).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     viewModel: LauncherViewModel,
