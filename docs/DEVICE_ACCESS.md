@@ -95,6 +95,45 @@ process `/update/` on the next boot rather than immediately on insert.
   "restore stock launcher" script (`custom_rep.sh` variants in this same
   repo) does in reverse.
 
+## The community's own tested recipe (alternative to the ADB route)
+
+Confirmed directly on the forum thread (dongfeng-aeolus.ru, topic 422) by
+the site admin, who reports installing this on two of their own cars in
+about an hour. Pre-made flash-drive archives, no manual script typing:
+
+- Flash drive #1 (installs ES File Explorer):
+  `https://dongfeng-aeolus.ru/wp-content/uploads/2025/12/USB1.zip`
+- Flash drive #2 (auto-launches ES + carries BackButton.apk,
+  GKeyboard.apk, `panels.apk` [a minimalist launcher], WiFiManager.apk):
+  `https://dongfeng-aeolus.ru/wp-content/uploads/2025/12/USB2.zip`
+- Flash drive #3 (removes ES afterwards, once no longer needed):
+  `https://dongfeng-aeolus.ru/wp-content/uploads/2025/12/USB3.zip`
+
+Extract only the `update/` folder from each zip to the **root** of a
+separate FAT32 USB drive (ignore any `__MACOSX` folder in the zip).
+
+Steps as posted by the forum:
+1. Power on the head unit, plug in flash drive #1, wait for it to reboot.
+2. **Pull the drive out while it's rebooting** (not before, not after).
+3. Once it's back up on the normal launcher, plug in flash drive #2 and
+   wait — ES File Explorer opens itself. Grant it storage access, then
+   browse to the same drive and install the four APKs in
+   `update/soft/` one at a time.
+4. `panels.apk` is a ready-made minimalist launcher — useful as an
+   immediate proof that "installing our own launcher and setting it as
+   Home" is possible on this unit at all, before spending more effort
+   wiring up this project's own APK the same way.
+5. Once this project's own `app-debug.apk` needs installing, it can be
+   dropped on the same USB drive and installed the same way through ES
+   File Explorer, then set as the Home app.
+6. Flash drive #3 is optional cleanup — removes ES File Explorer once
+   it's no longer needed (the forum links a Telegram post explaining why
+   one might want to, not yet reviewed here).
+
+This path needs no `adb` at all, at the cost of being less useful for
+follow-up work like `adb logcat`-based HVAC broadcast discovery — the
+`openADB` route above is still worth doing afterwards for that reason.
+
 ## Other ready-made hooks in that repo worth knowing about
 
 - `Others/Settingslaunch/update/custom_rep.sh` — force-opens the real
