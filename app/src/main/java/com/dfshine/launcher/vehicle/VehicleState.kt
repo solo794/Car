@@ -13,6 +13,9 @@ data class VehicleState(
     val outsideTempC: Int? = null,
     val coolantTempC: Int? = null,
     val fuelPercent: Float? = null,
+    /** Fuel left / tank size as reported by the car (litres on this platform). */
+    val fuelLitres: Float? = null,
+    val fuelCapacityLitres: Float? = null,
     /** Distance the car says it can still travel on the remaining fuel. */
     val rangeKm: Float? = null,
     val odometerKm: Float? = null,
@@ -21,6 +24,9 @@ data class VehicleState(
     val avgConsumption: Float? = null,
     val batteryVolts: Float? = null,
     val handBrake: Boolean? = null,
+    /** Steering wheel angle in degrees, negative = left. */
+    val steeringDeg: Float? = null,
+    val windows: Windows = Windows(),
     val doors: Doors = Doors(),
     val lights: Lights = Lights(),
     val tpms: Tpms? = null,
@@ -39,6 +45,17 @@ data class VehicleState(
         val hood: Boolean = false
     ) {
         val anyOpen get() = frontLeft || frontRight || rearLeft || rearRight || trunk || hood
+    }
+
+    /** Opening per window, 0 = closed .. 1 = fully open (FL, FR, RL, RR) + sunroof. */
+    data class Windows(
+        val open: List<Float> = listOf(0f, 0f, 0f, 0f),
+        val sunroofOpen: Float = 0f,
+        val sunroofTilt: Boolean = false,
+        val shadeOpen: Boolean = false,
+        val known: Boolean = false
+    ) {
+        val anyOpen get() = open.any { it > 0.05f } || sunroofOpen > 0.05f || sunroofTilt
     }
 
     data class Lights(

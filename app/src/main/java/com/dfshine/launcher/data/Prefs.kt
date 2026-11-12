@@ -59,6 +59,10 @@ class Prefs(context: Context) {
         const val KEY_VEHICLE_MODE = "vehicle_data_mode"
         const val KEY_VEHICLE_DEFAULT_CODES = "vehicle_allow_default_codes"
         const val KEY_TPMS_UNIT = "tpms_unit"
+        const val KEY_CONTROLS_ENABLED = "vehicle_controls_enabled"
+        const val KEY_CONTROLS_WHILE_MOVING = "vehicle_controls_while_moving"
+        const val KEY_CAR_COLOR = "car_model_color"
+        const val KEY_QUICK_APP_PREFIX = "quick_app_"
     }
 
     private fun putList(key: String, values: List<String>) {
@@ -260,4 +264,30 @@ class Prefs(context: Context) {
     var tpmsUnit: String
         get() = sp.getString(KEY_TPMS_UNIT, "bar") ?: "bar"
         set(value) = sp.edit().putString(KEY_TPMS_UNIT, value).apply()
+
+    /** Send window / sunroof / trunk commands to the car. Off by default. */
+    var vehicleControlsEnabled: Boolean
+        get() = sp.getBoolean(KEY_CONTROLS_ENABLED, false)
+        set(value) = sp.edit().putBoolean(KEY_CONTROLS_ENABLED, value).apply()
+
+    /** Allow window / sunroof commands above 0 km/h (the trunk always needs the car stopped in P). */
+    var vehicleControlsWhileMoving: Boolean
+        get() = sp.getBoolean(KEY_CONTROLS_WHILE_MOVING, false)
+        set(value) = sp.edit().putBoolean(KEY_CONTROLS_WHILE_MOVING, value).apply()
+
+    var carColorHex: String
+        get() = sp.getString(KEY_CAR_COLOR, "#6F8BA8") ?: "#6F8BA8"
+        set(value) = sp.edit().putString(KEY_CAR_COLOR, value).apply()
+
+    /** App (component key) behind a quick-bar slot: "media", "maps", "camera", "camera360". */
+    fun quickApp(slot: String): String? = sp.getString(KEY_QUICK_APP_PREFIX + slot, null)
+        ?: when (slot) {
+            "maps" -> gpsTargetApp
+            "camera" -> reverseCameraTargetApp
+            else -> null
+        }
+
+    fun setQuickApp(slot: String, key: String?) {
+        sp.edit().putString(KEY_QUICK_APP_PREFIX + slot, key).apply()
+    }
 }

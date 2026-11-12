@@ -50,7 +50,12 @@ class QingganCanBusClient(
         val message: String = "",
         val resolvedServiceCodes: Map<String, Int> = emptyMap(),
         val resolvedCallbackCodes: Map<Int, String> = emptyMap(),
-        val eventCount: Long = 0
+        val eventCount: Long = 0,
+        /** True only when setVehicleState and its VehicleState enum were verified from the vendor's own classes. */
+        val writeVerified: Boolean = false,
+        /** VehicleState enum names this firmware actually has (subset of [CONTROL_NAMES]). */
+        val controlsAvailable: Set<String> = emptySet(),
+        val writeProblem: String = ""
     )
 
     private val ctx = context.applicationContext
@@ -62,6 +67,9 @@ class QingganCanBusClient(
     @Volatile private var stopped = false
     private var serviceCodes: Map<String, Int> = emptyMap()
     private var callbackNames: Map<Int, String> = emptyMap()
+    private var vendor: VendorCodeResolver.Result? = null
+    private var setVehicleStateEnum: Class<*>? = null
+    private var lastWriteMs = 0L
     private var status = Status()
     private var eventCount = 0L
 
@@ -119,6 +127,7 @@ class QingganCanBusClient(
         val resolved = VendorCodeResolver.resolve(ctx)
         when {
             resolved != null -> {
+                vendor = resolved
                 serviceCodes = resolved.serviceCodes
                 callbackNames = resolved.callbackCodes.ifEmpty { DefaultCodes.callbacks }
                 status = status.copy(
@@ -188,6 +197,7 @@ class QingganCanBusClient(
         if (addCode != null) {
             transact(binder, addCode) { it.writeStrongBinder(callback) }?.recycle()
         }
+        verifyWritePath()
         publishStatus(status.copy(connected = true, message = "متصل"))
         poll()
     }
@@ -210,7 +220,14 @@ class QingganCanBusClient(
         call(svc, "getOdometer") { r -> if (r.readInt() != 0) applyOdometer(r) }
         call(svc, "getTPMSInfo") { r -> if (r.readInt() != 0) applyTpms(r) }
         call(svc, "getBatteryState") { r -> if (r.readInt() != 0) applyBattery(r) }
+        pollWindows(svc)
+        call(svc, "getSWCAngle") { r -> if (r.readInt() != 0) applySteering(r) }
         handler.postDelayed({ poll() }, POLL_MS)
+    }
+
+    private fun pollWindows(svc: IBinder) {
+        val name = if (codeFor("getWindowStatus") != null) "getWindowStatus" else "getWindowsStatus"
+        call(svc, name) { r -> if (r.readInt() != 0) applyWindows(r) }
     }
 
     private inline fun call(svc: IBinder, method: String, read: (Parcel) -> Unit) {
@@ -263,6 +280,8 @@ class QingganCanBusClient(
             "onOdometerChanged" -> if (p.readInt() != 0) applyOdometer(p)
             "onTPMSInfoChange" -> if (p.readInt() != 0) applyTpms(p)
             "onBatteryStateChanged" -> if (p.readInt() != 0) applyBattery(p)
+            "onWindowsStatusChanged", "onWindowStatusChanged" -> if (p.readInt() != 0) applyWindows(p)
+            "onSWCAngleChanged" -> if (p.readInt() != 0) applySteering(p)
             "onInstantaneousFuelConsumptionChanged" -> { val v = p.readFloat(); onState { it.copy(instantConsumption = v) } }
         }
     }
@@ -305,8 +324,12 @@ class QingganCanBusClient(
 
     /** FuelLevel: capacity, remain, percentage(f), shortage, instant(f), avg(f), histAvg(f), resetAvg(f). */
     private fun applyFuel(p: Parcel) {
-        p.readInt(); p.readInt()
+        val capacity = p.readInt()
+        val remain = p.readInt()
         val pct = p.readFloat()
+        if (capacity in 20..150 && remain in 0..capacity) {
+            onState { it.copy(fuelLitres = remain.toFloat(), fuelCapacityLitres = capacity.toFloat()) }
+        }
         p.readInt()
         val instant = p.readFloat()
         val avg = p.readFloat()
@@ -352,6 +375,113 @@ class QingganCanBusClient(
         if (volts in 5f..20f) onState { it.copy(batteryVolts = volts) }
     }
 
+    /**
+     * WindowStatus: fL, fR, rL, rR, sunroof, rollShade (0 closed / 1 open),
+     * then positions sunroof, roll, fL, fR, rL, rR (floats), then tilt (int).
+     */
+    private fun applyWindows(p: Parcel) {
+        val st = IntArray(6) { p.readInt() }
+        val sunPos = p.readFloat()
+        p.readFloat()
+        val pos = FloatArray(4) { p.readFloat() }
+        val tilt = p.readInt()
+        fun frac(state: Int, position: Float): Float = when {
+            position > 1f && position <= 100f -> position / 100f
+            position in 0.01f..1f -> position
+            state == 1 -> 1f
+            else -> 0f
+        }
+        val w = VehicleState.Windows(
+            open = List(4) { frac(st[it], pos[it]) },
+            sunroofOpen = frac(st[4], sunPos),
+            sunroofTilt = tilt == 1,
+            shadeOpen = st[5] == 1,
+            known = true
+        )
+        onState { it.copy(windows = w) }
+    }
+
+    /** SteeringAngle: direction (0 centre, 1 right, 2 left), angle (degrees). */
+    private fun applySteering(p: Parcel) {
+        val dir = p.readInt()
+        val angle = p.readInt()
+        if (angle !in 0..720) return
+        val deg = when (dir) { 1 -> angle.toFloat(); 2 -> -angle.toFloat(); else -> 0f }
+        onState { it.copy(steeringDeg = deg) }
+    }
+
+    // ------------------------------------------------------------------
+    // Controls (write). Every guard below must pass or nothing is sent.
+    // ------------------------------------------------------------------
+
+    /**
+     * Checks - from the vendor's OWN classes on this car - that
+     * `ICanBusService.setVehicleState(VehicleState, int)` exists with exactly
+     * that signature, and records which control names its enum has.
+     * Never uses the community default codes.
+     */
+    private fun verifyWritePath() {
+        val v = vendor
+        val problem: String? = when {
+            v == null -> "أرقام النظام مش مقروءة من العربية نفسها، فالتحكم مقفول"
+            v.loader == null -> "مفيش class loader للنظام"
+            v.serviceCodes["setVehicleState"] == null -> "الدالة setVehicleState مش موجودة في النظام ده"
+            else -> null
+        }
+        if (problem != null) {
+            status = status.copy(writeVerified = false, writeProblem = problem)
+            return
+        }
+        val iface = runCatching { Class.forName(SVC_DESC, false, v!!.loader) }.getOrNull()
+        val m = iface?.methods?.firstOrNull { it.name == "setVehicleState" }
+        val params = m?.parameterTypes
+        if (params == null || params.size != 2 || params[0].name != VEHICLE_STATE_CLASS ||
+            params[1] != Int::class.javaPrimitiveType
+        ) {
+            status = status.copy(writeVerified = false, writeProblem = "شكل setVehicleState مختلف: $m")
+            return
+        }
+        val enumCls = params[0]
+        val names = enumCls.enumConstants?.map { (it as Enum<*>).name }?.toSet().orEmpty()
+        if (enumCls.enumConstants?.firstOrNull() !is android.os.Parcelable) {
+            status = status.copy(writeVerified = false, writeProblem = "VehicleState مش Parcelable")
+            return
+        }
+        setVehicleStateEnum = enumCls
+        status = status.copy(
+            writeVerified = true,
+            controlsAvailable = CONTROL_NAMES.filter { it in names }.toSet(),
+            writeProblem = ""
+        )
+    }
+
+    /** Sends `setVehicleState(<vendor enum stateName>, value)`. [done] gets null on success or the reason it was refused. */
+    fun setVehicleState(stateName: String, value: Int, done: (String?) -> Unit) {
+        handler.post { done(doSetVehicleState(stateName, value)) }
+    }
+
+    private fun doSetVehicleState(stateName: String, value: Int): String? {
+        val svc = service ?: return "مش متصل بالعربية"
+        val enumCls = setVehicleStateEnum ?: return status.writeProblem.ifBlank { "التحكم مش متأكد منه على النظام ده" }
+        val code = vendor?.serviceCodes?.get("setVehicleState") ?: return "setVehicleState غير معروفة"
+        if (stateName !in CONTROL_NAMES) return "أمر غير مسموح: $stateName"
+        val constant = enumCls.enumConstants?.firstOrNull { (it as Enum<*>).name == stateName } as? android.os.Parcelable
+            ?: return "العربية دي مش بتدعم $stateName"
+        val now = System.currentTimeMillis()
+        if (now - lastWriteMs < 400) return "استنى ثانية بين الأوامر"
+        lastWriteMs = now
+        RawLog.note("SET", "setVehicleState", code, "$stateName=$value")
+        val reply = transact(svc, code) { d ->
+            d.writeInt(1)
+            constant.writeToParcel(d, 0)
+            d.writeInt(value)
+        } ?: return "الأمر اتبعت بس النظام رفضه"
+        reply.recycle()
+        handler.postDelayed({ service?.let { pollWindows(it) } }, 700)
+        handler.postDelayed({ service?.let { pollWindows(it) } }, 3000)
+        return null
+    }
+
     private fun codeFor(method: String): Int? =
         serviceCodes[method]
             ?: serviceCodes.entries.firstOrNull { it.key.equals(method, ignoreCase = true) }?.value
@@ -371,6 +501,19 @@ class QingganCanBusClient(
         const val SVC_ACTION = "com.qinggan.canbus.CanBusService"
         const val SVC_DESC = "com.qinggan.canbus.ICanBusService"
         const val CB_DESC = "com.qinggan.canbus.ICanBusServiceCallback"
+        const val VEHICLE_STATE_CLASS = "com.qinggan.canbus.VehicleState"
+
+        /** The only VehicleState commands this app will ever send (window / sunroof / trunk). */
+        val CONTROL_NAMES = setOf(
+            "DRIVER_POWER_WINDOW_CONTROL_SWITCH",
+            "PASSENGER_POWER_WINDOW_CONTROL_SWITCH",
+            "REAR_LEFT_POWER_WINDOW_CONTROL_SWITCH",
+            "REAR_RIGHT_POWER_WINDOW_CONTROL_SWITCH",
+            "POWER_SUNROOF_CONTROL_SWITCH",
+            "POWER_SUNROOF_CONTROL_TILT",
+            "SUNROOF_ROLLSHADE_CONTROL",
+            "TRUNK_RELEASE"
+        )
 
         /** `android.os.ServiceManager.getService(name)` via reflection (no hidden-API limits on Android 8.1). */
         fun getSystemService(name: String): IBinder? = try {

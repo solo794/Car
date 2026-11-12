@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity() {
     /** No-op if already running with the same settings. */
     private fun startVehicleData() {
         val prefs = viewModel.prefs
+        VehicleRepository.configureControls(prefs.vehicleControlsEnabled, prefs.vehicleControlsWhileMoving)
         VehicleRepository.start(applicationContext, prefs.vehicleDataMode, prefs.vehicleAllowDefaultCodes)
     }
 

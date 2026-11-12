@@ -37,7 +37,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.dfshine.launcher.data.LauncherViewModel
+import com.dfshine.launcher.vehicle.VehicleRepository
 import com.dfshine.launcher.service.NotificationBadgeService
 import com.dfshine.launcher.ui.components.AppPickerDialog
 import com.dfshine.launcher.ui.theme.toHex
@@ -98,6 +100,39 @@ fun SettingsScreen(
                                 OutlinedButton(onClick = { prefs.tpmsUnit = value; viewModel.notifySettingsChanged() }) { Text(label) }
                             }
                         }
+                    }
+                    Text("لون مجسم العربية", modifier = Modifier.padding(top = 8.dp))
+                    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CAR_COLORS.forEach { hex ->
+                            val c = Color(android.graphics.Color.parseColor(hex))
+                            Row(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(c)
+                                    .clickable { prefs.carColorHex = hex; viewModel.notifySettingsChanged() },
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (prefs.carColorHex.equals(hex, true)) Icon(Icons.Filled.Check, null, tint = Color.Black)
+                            }
+                        }
+                    }
+                    Text("التحكم في العربية (الشبابيك · فتحة السقف · الشنطة)", modifier = Modifier.padding(top = 12.dp))
+                    Text(
+                        "مقفول افتراضياً. حتى لو فعّلته، الأوامر مش هتتبعت غير لو التطبيق قرا الأوامر من نظام العربية نفسه " +
+                            "(شوف شاشة التشخيص). الشنطة بتحتاج العربية واقفة والفتيس على P.",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                    SettingsSwitchRow("تفعيل التحكم", prefs.vehicleControlsEnabled) {
+                        prefs.vehicleControlsEnabled = it
+                        VehicleRepository.configureControls(it, prefs.vehicleControlsWhileMoving)
+                        viewModel.notifySettingsChanged()
+                    }
+                    SettingsSwitchRow("السماح بالشبابيك والسقف أثناء الحركة", prefs.vehicleControlsWhileMoving) {
+                        prefs.vehicleControlsWhileMoving = it
+                        VehicleRepository.configureControls(prefs.vehicleControlsEnabled, it)
+                        viewModel.notifySettingsChanged()
                     }
                     BuiltInToolRow("مصدر البيانات والتشخيص (CAN)", onOpenVehicleDiagnostics, null)
                 }
@@ -490,6 +525,9 @@ fun SettingsScreen(
         )
     }
 }
+
+/** Body colours for the 3D model (Shine palette + a few classics). */
+private val CAR_COLORS = listOf("#8E969E", "#6F8BA8", "#C9CDD1", "#F2F2F0", "#1C1F23", "#B3262E", "#2F4D7A")
 
 @Composable
 private fun SectionTitle(text: String) {

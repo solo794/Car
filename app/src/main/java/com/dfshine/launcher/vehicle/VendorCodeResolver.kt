@@ -20,8 +20,13 @@ object VendorCodeResolver {
         /** method name -> transaction code, e.g. "getVehicleSpeed" -> 26 */
         val serviceCodes: Map<String, Int>,
         /** transaction code -> callback method name, e.g. 16 -> "onVehicleSpeedChanged" */
-        val callbackCodes: Map<Int, String>
-    )
+        val callbackCodes: Map<Int, String>,
+        /** Class loader that holds the vendor's com.qinggan.canbus.* classes (for typed writes). */
+        val loader: ClassLoader? = null
+    ) {
+        override fun toString() =
+            "Result(from=$loadedFrom, service=${serviceCodes.size} codes, callbacks=${callbackCodes.size} codes)"
+    }
 
     private const val TAG = "VendorCodeResolver"
     private const val SVC_STUB = "com.qinggan.canbus.ICanBusService\$Stub"
@@ -69,7 +74,7 @@ object VendorCodeResolver {
                 readTransactionConstants(Class.forName(CB_STUB, false, loader))
             }.getOrDefault(emptyMap())
             Log.i(TAG, "Resolved ${svc.size} service / ${cb.size} callback codes from $from")
-            Result(from, svc, cb.entries.associate { (k, v) -> v to k })
+            Result(from, svc, cb.entries.associate { (k, v) -> v to k }, loader)
         } catch (_: Throwable) {
             null
         }

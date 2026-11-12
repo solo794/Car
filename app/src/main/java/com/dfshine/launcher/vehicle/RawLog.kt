@@ -61,6 +61,13 @@ object RawLog {
         }
     }
 
+    /** Free-text entry (used for commands we send). */
+    fun note(kind: String, name: String, code: Int, text: String) = synchronized(buffer) {
+        buffer.addLast(Entry(System.currentTimeMillis(), kind, name, code, 0, text))
+        while (buffer.size > MAX) buffer.removeFirst()
+        _entries.value = buffer.toList()
+    }
+
     fun clear() = synchronized(buffer) {
         buffer.clear()
         _entries.value = emptyList()

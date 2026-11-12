@@ -101,7 +101,11 @@ fun HomeScreen(
             ) { pagerPage ->
                 if (dashboardPages == 1 && pagerPage == 0) {
                     DashboardPage(
-                        tpmsUnit = prefs.tpmsUnit,
+                        viewModel = viewModel,
+                        onLaunch = { app ->
+                            if (app.key in prefs.lockedApps) onRequestUnlock(app) { onLaunch(app) } else onLaunch(app)
+                        },
+                        onOpenDrawer = onOpenDrawer,
                         onOpenDiagnostics = onOpenVehicleDiagnostics,
                         onOpenSettings = onOpenSettings,
                         modifier = Modifier.statusBarsPadding()
