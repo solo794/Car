@@ -92,6 +92,7 @@ private class RealCarController(
 
     private val engine: Engine
     private val viewer: ModelViewer
+    private val manipulator: Manipulator
     private val choreographer = Choreographer.getInstance()
     private var destroyed = false
     private var lastFrameNs = 0L
@@ -112,7 +113,7 @@ private class RealCarController(
         Utils.init()
         engine = Engine.create()
         val uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK).apply { isOpaque = false }
-        val manipulator = Manipulator.Builder()
+        manipulator = Manipulator.Builder()
             .targetPosition(0f, -0.1f, -4f)
             .orbitHomePosition(2.9f, 0.9f, -1.0f)   // front three-quarter, driver (left) side
             .zoomSpeed(0.05f)
@@ -178,7 +179,7 @@ private class RealCarController(
     private fun installGestures() {
         val detector = GestureDetector(textureView.context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                viewer.cameraManipulator?.jumpToBookmark(viewer.cameraManipulator!!.homeBookmark)
+                manipulator.jumpToBookmark(manipulator.homeBookmark)
                 return true
             }
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
