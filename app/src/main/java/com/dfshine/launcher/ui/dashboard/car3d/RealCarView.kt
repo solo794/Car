@@ -100,6 +100,7 @@ private class RealCarController(
 
     // Animated values (smoothed towards target each frame)
     private val doors = FloatArray(4)
+    private val windows = FloatArray(4)
     private var trunk = 0f
     private var hood = 0f
     private var steer = 0f
@@ -148,9 +149,10 @@ private class RealCarController(
         }
         for (e in asset.renderableEntities) {
             partByEntity[e] = when (asset.getName(e)) {
-                "door_fl" -> Part.DOOR_FL; "door_fr" -> Part.DOOR_FR
-                "door_rl" -> Part.DOOR_RL; "door_rr" -> Part.DOOR_RR
-                "trunk" -> Part.TRUNK; "hood" -> Part.HOOD
+                "door_fl", "glass_fl" -> Part.DOOR_FL; "door_fr", "glass_fr" -> Part.DOOR_FR
+                "door_rl", "glass_rl" -> Part.DOOR_RL; "door_rr", "glass_rr" -> Part.DOOR_RR
+                "trunk", "trunk_glass" -> Part.TRUNK; "hood", "hood_glass" -> Part.HOOD
+                "body_glass" -> Part.ROOF
                 else -> Part.BODY
             }
         }
@@ -221,6 +223,8 @@ private class RealCarController(
         val d = s.doors
         val goals = floatArrayOf(b(d.frontLeft), b(d.frontRight), b(d.rearLeft), b(d.rearRight))
         for (i in 0..3) doors[i] += (goals[i] - doors[i]) * k
+        val w = s.windows.open
+        for (i in 0..3) windows[i] += (w.getOrElse(i) { 0f } - windows[i]) * min(1f, dt * 2.5f)
         trunk += (b(d.trunk) - trunk) * k
         hood += (b(d.hood) - hood) * k
         val steerGoal = Math.toRadians(((s.steeringDeg ?: 0f) / 15f).coerceIn(-35f, 35f).toDouble()).toFloat()
@@ -242,6 +246,8 @@ private class RealCarController(
         pose("steer_fl", Mat.rotY(steer))
         pose("steer_fr", Mat.rotY(steer))
         for (w in arrayOf("wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr")) pose(w, Mat.rotX(spin))
+        // Window glass slides straight down into its door (model units; the root is scaled to metres).
+        GLASS.forEachIndexed { i, g -> pose(g, Mat.translateY(-WINDOW_DROP * windows[i])) }
     }
 
     private fun pose(name: String, local: FloatArray) {
@@ -265,8 +271,11 @@ private class RealCarController(
         const val MODEL_ASSET = "models/shine.glb"
         private val RIG_NAMES = listOf(
             "door_fl", "door_fr", "door_rl", "door_rr", "trunk", "hood",
-            "steer_fl", "steer_fr", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"
+            "steer_fl", "steer_fr", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr",
+            "glass_fl", "glass_fr", "glass_rl", "glass_rr"
         )
+        private val GLASS = arrayOf("glass_fl", "glass_fr", "glass_rl", "glass_rr")
+        private const val WINDOW_DROP = 0.12f
     }
 }
 
@@ -281,6 +290,7 @@ private object Mat {
         }
         return out
     }
+    fun translateY(t: Float) = floatArrayOf(1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, t, 0f, 1f)
     fun rotY(a: Float): FloatArray {
         val c = cos(a); val s = sin(a)
         return floatArrayOf(c, 0f, -s, 0f, 0f, 1f, 0f, 0f, s, 0f, c, 0f, 0f, 0f, 0f, 1f)

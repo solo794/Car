@@ -127,6 +127,7 @@ fun DashboardPage(
     var showSunroof by remember { mutableStateOf(false) }
     var confirmTrunk by remember { mutableStateOf(false) }
     var realModelFailed by remember { mutableStateOf(false) }
+    var showTpms by remember { mutableStateOf(false) }
     val carColor = remember(viewModel.settingsVersion) {
         runCatching { Color(android.graphics.Color.parseColor(prefs.carColorHex)) }.getOrDefault(Color(0xFF6F8BA8))
     }
@@ -185,7 +186,14 @@ fun DashboardPage(
                     } else {
                         Car3DView(state, carColor, ::onPart, Modifier.fillMaxSize())
                     }
-                    TpmsCorners(state.tpms, prefs.tpmsUnit)
+                    // Tyre pressures: shown on demand (TPMS button) or automatically on a warning.
+                    if (showTpms || state.tpms?.anyWarning == true) TpmsCorners(state.tpms, prefs.tpmsUnit)
+                    TpmsButton(
+                        tpms = state.tpms,
+                        active = showTpms,
+                        onClick = { showTpms = !showTpms },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 26.dp, end = 4.dp)
+                    )
                     Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally) {
                         DoorWarning(state.doors)
                         Text(
@@ -447,6 +455,28 @@ private fun TpmsCorners(t: VehicleState.Tpms?, unit: String) {
         TireLabel(t, 1, "أ.ي", unit, Modifier.align(Alignment.TopEnd))
         TireLabel(t, 2, "خ.ش", unit, Modifier.align(Alignment.BottomStart).padding(bottom = 22.dp))
         TireLabel(t, 3, "خ.ي", unit, Modifier.align(Alignment.BottomEnd).padding(bottom = 22.dp))
+    }
+}
+
+@Composable
+private fun TpmsButton(tpms: VehicleState.Tpms?, active: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    val warn = tpms?.anyWarning == true
+    val color = when {
+        tpms == null -> TextDim
+        warn -> Warn
+        else -> Ok
+    }
+    Row(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (active) color.copy(alpha = 0.18f) else PanelBg)
+            .border(1.5.dp, color.copy(alpha = 0.8f), RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("(!) ", color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text("TPMS", color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }
 

@@ -64,6 +64,7 @@ class Prefs(context: Context) {
         const val KEY_CAR_COLOR = "car_model_color"
         const val KEY_QUICK_APP_PREFIX = "quick_app_"
         const val KEY_CAR_MODEL_STYLE = "car_model_style"
+        const val KEY_BOTTOM_RESERVE = "oem_bar_reserve_percent"
     }
 
     private fun putList(key: String, values: List<String>) {
@@ -296,4 +297,12 @@ class Prefs(context: Context) {
     var carModelStyle: String
         get() = sp.getString(KEY_CAR_MODEL_STYLE, "real") ?: "real"
         set(value) = sp.edit().putString(KEY_CAR_MODEL_STYLE, value).apply()
+
+    /**
+     * Percent of the screen height kept free at the bottom for the head
+     * unit's own climate bar, which is drawn over every app (0 = none).
+     */
+    var bottomReservePercent: Int
+        get() = sp.getInt(KEY_BOTTOM_RESERVE, 15)
+        set(value) = sp.edit().putInt(KEY_BOTTOM_RESERVE, value).apply()
 }

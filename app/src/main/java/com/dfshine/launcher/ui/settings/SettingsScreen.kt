@@ -101,6 +101,17 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    Text("مساحة شريط التكييف الأصلي تحت: ${prefs.bottomReservePercent}% من الشاشة", modifier = Modifier.padding(top = 8.dp))
+                    Text(
+                        "شريط التكييف بتاع العربية بيترسم فوق أي تطبيق في آخر الشاشة. لو فيه فراغ زيادة تحت قلّلها، ولو زراير مستخبية تحت الشريط زوّدها.",
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    Slider(
+                        value = prefs.bottomReservePercent.toFloat(),
+                        onValueChange = { prefs.bottomReservePercent = it.toInt(); viewModel.notifySettingsChanged() },
+                        valueRange = 0f..30f,
+                        steps = 29
+                    )
                     Text("شكل مجسم العربية", modifier = Modifier.padding(top = 8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                         listOf("real" to "واقعي (3D حقيقي)", "simple" to "مبسّط (أخف)").forEach { (value, label) ->

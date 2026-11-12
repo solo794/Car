@@ -33,6 +33,13 @@ const FRONT_DOOR = [-0.02, 0.19], REAR_DOOR = [-0.25, -0.02];
 const DOOR_X = 0.245;
 const TRUNK_HINGE = [-0.45, 0.33], HOOD_HINGE = [0.25, 0.295];
 
+const GLASS_RGB = [0.553, 0.627, 0.604];
+function isGlass(cy, uv) {
+  if (cy < 0.24) return false;
+  const [R, G, B] = texRGB(uv[0], uv[1]);
+  return Math.abs(R - GLASS_RGB[0]) + Math.abs(G - GLASS_RGB[1]) + Math.abs(B - GLASS_RGB[2]) < 0.06;
+}
+
 function classify(cx, cy, cz, ny, uv) {
   const side = cx >= 0 ? 1 : -1, ax = Math.abs(cx);
   for (const [k, [s, zc]] of Object.entries(WHEELS)) {
@@ -112,8 +119,10 @@ for (const node of meshNodes) {
       const fn = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
       const ny = Math.abs(fn[1]) / (Math.hypot(...fn) || 1);
       const uv = T ? [(T[a * 2] + T[b * 2] + T[c * 2]) / 3, (T[a * 2 + 1] + T[b * 2 + 1] + T[c * 2 + 1]) / 3] : [0, 0];
-      const name = classify(cx, cy, cz, ny, uv);
-      const pp = part(name), pv = pivots[name];
+      const base = classify(cx, cy, cz, ny, uv);
+      const glass = !base.startsWith('wheel') && !base.startsWith('caliper') && isGlass(cy, uv);
+      const name = glass ? base + '|glass' : base;
+      const pp = part(name), pv = pivots[base];
       for (const v of [a, b, c]) {
         const key = primId * 4194304 + v;
         let ni = pp.map.get(key);
@@ -149,20 +158,40 @@ for (const k of Object.keys(WHEELS)) {
   carNode.addChild(sn);
   steerNodes[k] = sn;
 }
+// Tinted, see-through glass so the interior shows (the source baked glass into the opaque texture).
+const glassMat = doc.createMaterial('glass')
+  .setBaseColorFactor([0.02, 0.035, 0.04, 0.32])
+  .setMetallicFactor(0.0)
+  .setRoughnessFactor(0.04)
+  .setAlphaMode('BLEND')
+  .setDoubleSided(true);
+const partNodes = {};
 const counts = {};
 for (const [name, pp] of Object.entries(parts)) {
-  const prim = doc.createPrimitive().setMaterial(material)
+  const isGlassPart = name.endsWith('|glass');
+  const baseName = name.replace('|glass', '');
+  const prim = doc.createPrimitive().setMaterial(isGlassPart ? glassMat : material)
     .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array(pp.pos)).setBuffer(buffer))
     .setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint32Array(pp.idx)).setBuffer(buffer));
   if (pp.nor.length) prim.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setArray(new Float32Array(pp.nor)).setBuffer(buffer));
-  if (pp.uv.length) prim.setAttribute('TEXCOORD_0', doc.createAccessor().setType('VEC2').setArray(new Float32Array(pp.uv)).setBuffer(buffer));
-  if (pp.tan.length) prim.setAttribute('TANGENT', doc.createAccessor().setType('VEC4').setArray(new Float32Array(pp.tan)).setBuffer(buffer));
-  const node = doc.createNode(name).setMesh(doc.createMesh(name).addPrimitive(prim));
-  const wheel = name.match(/^(wheel|caliper)_(\w\w)$/);
+  if (pp.uv.length && !isGlassPart) prim.setAttribute('TEXCOORD_0', doc.createAccessor().setType('VEC2').setArray(new Float32Array(pp.uv)).setBuffer(buffer));
+  if (pp.tan.length && !isGlassPart) prim.setAttribute('TANGENT', doc.createAccessor().setType('VEC4').setArray(new Float32Array(pp.tan)).setBuffer(buffer));
+  const door = baseName.match(/^door_(\w\w)$/);
+  const nodeName = isGlassPart ? (door ? 'glass_' + door[1] : baseName + '_glass') : baseName;
+  const node = doc.createNode(nodeName).setMesh(doc.createMesh(nodeName).addPrimitive(prim));
+  const wheel = baseName.match(/^(wheel|caliper)_(\w\w)$/);
   if (wheel) steerNodes[wheel[2]].addChild(node);           // relative to the steer pivot
-  else carNode.addChild(node.setTranslation(pivots[name]));
-  counts[name] = pp.idx.length / 3;
+  else if (isGlassPart && door) (partNodes[baseName] ??= doc.createNode(baseName).setTranslation(pivots[baseName])).addChild(node);
+  else if (isGlassPart) carNode.addChild(node.setTranslation(pivots[baseName]));
+  else {
+    // A door node may already exist (created to hold its window glass): give it the mesh.
+    const existing = partNodes[baseName];
+    if (existing) { existing.setMesh(node.getMesh()); node.dispose(); }
+    else carNode.addChild(partNodes[baseName] = node.setTranslation(pivots[baseName]));
+  }
+  counts[nodeName] = pp.idx.length / 3;
 }
+for (const n of Object.values(partNodes)) if (!n.getParentNode()) carNode.addChild(n);
 console.log('triangles per part:', counts);
 
 await doc.transform(

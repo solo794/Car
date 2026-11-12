@@ -37,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.graphics.Color
 import com.dfshine.launcher.data.LauncherViewModel
 import com.dfshine.launcher.model.AppInfo
 import com.dfshine.launcher.service.NotificationBadgeService
@@ -75,10 +77,12 @@ fun HomeScreen(
     val pagerState = rememberPagerState(pageCount = { pageCount })
     val onDashboard = dashboardPages == 1 && pagerState.currentPage == 0
 
+    val reserve = (LocalConfiguration.current.screenHeightDp * prefs.bottomReservePercent / 100).dp
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(if (onDashboard) Color(0xFF05090C) else MaterialTheme.colorScheme.background)
+            .padding(bottom = reserve)
             .pointerInput(Unit) {
                 detectVerticalDragGestures { _, dragAmount ->
                     if (dragAmount > 40) onOpenQuickPanel()
@@ -146,7 +150,8 @@ fun HomeScreen(
             )
         }
 
-        DockBar(
+        // The dashboard has its own quick-apps bar, so the dock only shows on app pages.
+        if (!onDashboard) DockBar(
             viewModel = viewModel,
             onOpenDrawer = onOpenDrawer,
             onLaunch = onLaunch,
