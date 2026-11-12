@@ -8,12 +8,15 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
-import android.widget.Toast
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,8 +24,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,10 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.Luggage
 import androidx.compose.material.icons.filled.Map
@@ -70,17 +72,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.CompositionLocalProvider
 import com.dfshine.launcher.data.LauncherViewModel
 import com.dfshine.launcher.model.AppInfo
 import com.dfshine.launcher.service.NotificationBadgeService
@@ -96,20 +103,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val TextMain = Color(0xFFEAF4F6)
-private val TextDim = Color(0xFF8FA3AA)
-private val PanelBg = Color(0x33000000)
-private val Ok = Color(0xFF3DDC97)
-private val Warn = Color(0xFFFF5A5A)
-private val Amber = Color(0xFFFFB020)
+// =============================================================================
+// Stateful entry point (reads the car, prefs, media; owns dialogs & messages)
+// =============================================================================
 
-/**
- * Car dashboard home page: header (clock, temps, fuel), digital speed + gear,
- * light indicators, the interactive 3D car with its control column and
- * TPMS, a fuel card, a quick-apps bar and the now-playing card.
- * The OEM climate bar stays where it is - it is a system layer drawn by the
- * head unit over every app, so this page simply leaves room for it.
- */
 @Composable
 fun DashboardPage(
     viewModel: LauncherViewModel,
@@ -122,19 +119,21 @@ fun DashboardPage(
     val state by VehicleRepository.state.collectAsState()
     val status by VehicleRepository.status.collectAsState()
     val prefs = viewModel.prefs
-    val accent = MaterialTheme.colorScheme.primary
     val context = LocalContext.current
+    val version = viewModel.settingsVersion
+
     var showSunroof by remember { mutableStateOf(false) }
     var confirmTrunk by remember { mutableStateOf(false) }
     var realModelFailed by remember { mutableStateOf(false) }
-    var showTpms by remember { mutableStateOf(false) }
-    val carColor = remember(viewModel.settingsVersion) {
+    var picking by remember { mutableStateOf<QuickSlot?>(null) }
+    var notice by remember { mutableStateOf<Notice?>(null) }
+    val carColor = remember(version) {
         runCatching { Color(android.graphics.Color.parseColor(prefs.carColorHex)) }.getOrDefault(Color(0xFF6F8BA8))
     }
 
     fun send(c: Control, open: Boolean) {
         VehicleRepository.control(c, open) { err ->
-            Toast.makeText(context, err ?: "تم إرسال الأمر", Toast.LENGTH_SHORT).show()
+            notice = if (err == null) Notice("تم إرسال الأمر", ok = true) else Notice(err, ok = false)
         }
     }
 
@@ -152,72 +151,50 @@ fun DashboardPage(
         }
     }
 
-    Box(
-        modifier
-            .fillMaxSize()
-            .background(
-                Brush.radialGradient(
-                    listOf(Color(0xFF1C5560), Color(0xFF0C2A31), Color(0xFF05090C)),
-                    radius = 1600f
-                )
-            )
-    ) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp)) {
-            TopInfoRow(state)
-            SpeedGearRow(state, accent)
-            Spacer(Modifier.height(4.dp))
-            IndicatorBar(state.lights, accent)
-            Row(Modifier.weight(1f).fillMaxWidth()) {
-                ControlColumn(
-                    state = state,
-                    accent = accent,
-                    onWindowsAll = {
-                        val open = !state.windows.open.any { it > 0.5f }
-                        val main = Handler(Looper.getMainLooper())
-                        // Space the four commands out; the client also rate-limits.
-                        Control.WINDOWS.forEachIndexed { i, c -> main.postDelayed({ send(c, open) }, i * 450L) }
-                    },
-                    onSunroof = { showSunroof = true },
-                    onTrunk = { confirmTrunk = true }
-                )
-                Box(Modifier.weight(1f).fillMaxHeight()) {
-                    if (prefs.carModelStyle == "real" && !realModelFailed) {
-                        RealCarView(state, ::onPart, onFailure = { realModelFailed = true }, modifier = Modifier.fillMaxSize())
-                    } else {
-                        Car3DView(state, carColor, ::onPart, Modifier.fillMaxSize())
-                    }
-                    // Tyre pressures: shown on demand (TPMS button) or automatically on a warning.
-                    if (showTpms || state.tpms?.anyWarning == true) TpmsCorners(state.tpms, prefs.tpmsUnit)
-                    TpmsButton(
-                        tpms = state.tpms,
-                        active = showTpms,
-                        onClick = { showTpms = !showTpms },
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 26.dp, end = 4.dp)
-                    )
-                    Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally) {
-                        DoorWarning(state.doors)
-                        Text(
-                            "اسحب للّف · اضغط على باب للشباك · السقف · الشنطة",
-                            color = TextDim.copy(alpha = 0.6f), fontSize = 10.sp
-                        )
-                    }
-                }
-            }
-            FuelCard(state)
-            Spacer(Modifier.height(6.dp))
-            QuickAppsBar(viewModel, onLaunch, onOpenDrawer, accent)
-            Spacer(Modifier.height(6.dp))
-            NowPlayingCard(accent)
-            StatusRow(state, status.writeVerified, onOpenDiagnostics, onOpenSettings)
-        }
+    val nowPlaying = rememberNowPlaying()
+    val quickApps = remember(version, viewModel.allApps) {
+        QUICK_SLOTS.map { slot -> slot to prefs.quickApp(slot.id)?.let { viewModel.appByKey(it) } }
     }
 
+    DashboardContent(
+        state = state,
+        canWrite = status.writeVerified,
+        accent = MaterialTheme.colorScheme.primary,
+        tpmsUnit = prefs.tpmsUnit,
+        nowPlaying = nowPlaying.value,
+        quickApps = quickApps.map { (slot, app) -> QuickAppUi(slot, app?.label) },
+        notice = notice,
+        onNoticeShown = { notice = null },
+        available = { VehicleRepository.isAvailable(it) },
+        onWindowsAll = {
+            val open = !state.windows.open.any { it > 0.5f }
+            val main = Handler(Looper.getMainLooper())
+            // Space the four commands out; the client also rate-limits.
+            Control.WINDOWS.forEachIndexed { i, c -> main.postDelayed({ send(c, open) }, i * 450L) }
+        },
+        onSunroof = { showSunroof = true },
+        onTrunk = { confirmTrunk = true },
+        onQuickApp = { slot ->
+            val app = quickApps.firstOrNull { it.first == slot }?.second
+            if (app != null) onLaunch(app) else picking = slot
+        },
+        onQuickAppLong = { picking = it },
+        onOpenDrawer = onOpenDrawer,
+        onMedia = { action -> nowPlaying.value?.controller?.transportControls?.let(action) },
+        onOpenDiagnostics = onOpenDiagnostics,
+        onOpenSettings = onOpenSettings,
+        car = { m ->
+            if (prefs.carModelStyle == "real" && !realModelFailed) {
+                RealCarView(state, ::onPart, onFailure = { realModelFailed = true }, modifier = m)
+            } else {
+                Car3DView(state, carColor, ::onPart, m)
+            }
+        },
+        modifier = modifier
+    )
+
     if (showSunroof) {
-        SunroofDialog(
-            state.windows,
-            onDismiss = { showSunroof = false },
-            onAction = { c, open -> showSunroof = false; send(c, open) }
-        )
+        SunroofDialog(state.windows, onDismiss = { showSunroof = false }) { c, open -> showSunroof = false; send(c, open) }
     }
     if (confirmTrunk) {
         val demo = state.source == VehicleState.Source.DEMO
@@ -240,85 +217,236 @@ fun DashboardPage(
             dismissButton = { TextButton(onClick = { confirmTrunk = false }) { Text("إلغاء") } }
         )
     }
+    picking?.let { slot ->
+        AppPickerDialog(
+            title = "اختار تطبيق «${slot.label}» (ضغطة طويلة تغيّره بعدين)",
+            apps = viewModel.allApps,
+            onDismiss = { picking = null },
+            onPick = { app ->
+                prefs.setQuickApp(slot.id, app.key)
+                viewModel.notifySettingsChanged()
+                picking = null
+            }
+        )
+    }
+}
+
+// =============================================================================
+// Stateless UI (also used by the screenshot test)
+// =============================================================================
+
+data class Notice(val text: String, val ok: Boolean)
+data class NowPlayingUi(val title: String, val artist: String, val playing: Boolean, val progress: Float?, val controller: MediaController? = null)
+data class QuickSlot(val id: String, val label: String, val icon: ImageVector)
+data class QuickAppUi(val slot: QuickSlot, val appLabel: String?)
+
+val QUICK_SLOTS = listOf(
+    QuickSlot("media", "ميديا", Icons.Filled.MusicNote),
+    QuickSlot("maps", "خرائط", Icons.Filled.Map),
+    QuickSlot("camera", "كاميرا", Icons.Filled.CameraAlt),
+    QuickSlot("camera360", "360°", Icons.Filled.Videocam)
+)
+
+@Composable
+fun DashboardContent(
+    state: VehicleState,
+    canWrite: Boolean,
+    accent: Color,
+    tpmsUnit: String,
+    nowPlaying: NowPlayingUi?,
+    quickApps: List<QuickAppUi>,
+    notice: Notice?,
+    onNoticeShown: () -> Unit,
+    available: (Control) -> Boolean,
+    onWindowsAll: () -> Unit,
+    onSunroof: () -> Unit,
+    onTrunk: () -> Unit,
+    onQuickApp: (QuickSlot) -> Unit,
+    onQuickAppLong: (QuickSlot) -> Unit,
+    onOpenDrawer: () -> Unit,
+    onMedia: ((android.media.session.MediaController.TransportControls) -> Unit) -> Unit,
+    onOpenDiagnostics: () -> Unit,
+    onOpenSettings: () -> Unit,
+    car: @Composable (Modifier) -> Unit,
+    modifier: Modifier = Modifier,
+    now: Date? = null
+) {
+    var showTpms by remember { mutableStateOf(false) }
+    Box(modifier.fillMaxSize().background(Dash.Background)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            TopBar(state, canWrite, accent, onOpenDiagnostics, onOpenSettings, now)
+            Spacer(Modifier.height(10.dp))
+            HeroRow(state, accent)
+            Spacer(Modifier.height(12.dp))
+            TelltaleBar(state.lights)
+            // ---- Stage ----
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                StageLight(accent)
+                car(Modifier.fillMaxSize())
+                ControlRail(
+                    state, accent, available,
+                    onWindowsAll, onSunroof, onTrunk,
+                    Modifier.align(Alignment.CenterStart)
+                )
+                if (showTpms || state.tpms?.anyWarning == true) TpmsOverlay(state.tpms, tpmsUnit)
+                Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally) {
+                    DoorWarning(state.doors)
+                }
+                TpmsButton(state.tpms, showTpms, { showTpms = !showTpms }, Modifier.align(Alignment.BottomEnd).padding(bottom = 6.dp))
+                NoticePill(notice, onNoticeShown, Modifier.align(Alignment.TopCenter).padding(top = 6.dp))
+            }
+            TripCard(state, accent)
+            Spacer(Modifier.height(10.dp))
+            MediaCard(nowPlaying, accent, onMedia)
+            Spacer(Modifier.height(10.dp))
+            QuickBar(quickApps, accent, onQuickApp, onQuickAppLong, onOpenDrawer)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Header
+// Top bar
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun TopInfoRow(s: VehicleState) {
-    var now by remember { mutableStateOf(Date()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = Date(); delay(1000)
-        }
-    }
+private fun TopBar(s: VehicleState, canWrite: Boolean, accent: Color, onDiag: () -> Unit, onSettings: () -> Unit, fixedNow: Date?) {
+    var now by remember { mutableStateOf(fixedNow ?: Date()) }
+    if (fixedNow == null) LaunchedEffect(Unit) { while (true) { now = Date(); delay(1000) } }
     val time = remember { SimpleDateFormat("hh:mm", Locale.US) }
     val ampm = remember { SimpleDateFormat("a", Locale.US) }
-    val date = remember { SimpleDateFormat("EEEE d MMMM", Locale("ar")) }
-
+    val date = remember { SimpleDateFormat("EEEE، d MMMM", Locale("ar")) }
+    val (label, color) = when (s.source) {
+        VehicleState.Source.LIVE -> (if (canWrite) "CAN · تحكم" else "CAN · مباشر") to Dash.Ok
+        VehicleState.Source.DEMO -> "عرض تجريبي" to Dash.Warn
+        VehicleState.Source.NONE -> "غير متصل" to Dash.TextTertiary
+    }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            InfoLine(Icons.Filled.Thermostat, s.outsideTempC?.let { "$it°C" } ?: "--", "برّه")
-            InfoLine(Icons.Filled.Thermostat, s.coolantTempC?.let { "$it°C" } ?: "--", "المحرك")
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    time.format(now), color = TextMain, fontSize = 40.sp,
-                    fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace
-                )
-                Text(ampm.format(now), color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
-            }
-            Text(date.format(now), color = TextDim, fontSize = 12.sp)
-        }
-        Column(Modifier.weight(1f), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            InfoLine(Icons.Filled.LocalGasStation, s.fuelPercent?.let { "${it.toInt()}%" } ?: "--", "بنزين", alignEnd = true)
-            InfoLine(Icons.Filled.DirectionsCar, s.rangeKm?.let { "${it.toInt()}" } ?: "--", "كم", alignEnd = true)
-        }
-    }
-}
-
-@Composable
-private fun InfoLine(icon: ImageVector, value: String, label: String, alignEnd: Boolean = false) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        if (!alignEnd) Icon(icon, null, tint = TextDim, modifier = Modifier.size(16.dp).padding(end = 2.dp))
-        Text(value, color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-        Text(" $label", color = TextDim, fontSize = 11.sp)
-        if (alignEnd) Icon(icon, null, tint = TextDim, modifier = Modifier.size(16.dp).padding(start = 2.dp))
-    }
-}
-
-@Composable
-private fun SpeedGearRow(s: VehicleState, accent: Color) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                s.speedKmh?.toString() ?: "--", color = TextMain, fontSize = 50.sp,
-                fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace
+        Row(
+            Modifier.glass(radius = 16.dp).clickable(onClick = onDiag).padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier.size(8.dp).clip(CircleShape).background(color)
+                    .drawBehind { drawCircle(color.copy(alpha = 0.35f), radius = size.minDimension * 1.4f) }
             )
-            Text("KM/H", color = TextDim, fontSize = 11.sp, modifier = Modifier.offset(y = (-6).dp))
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = Dash.Label.copy(color = Dash.TextPrimary))
         }
-        Spacer(Modifier.width(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(VehicleState.Gear.P, VehicleState.Gear.R, VehicleState.Gear.N, VehicleState.Gear.D).forEach { g ->
-                val sport = s.gear == VehicleState.Gear.S || s.gear == VehicleState.Gear.B
-                val active = s.gear == g || (g == VehicleState.Gear.D && sport)
-                val label = if (g == VehicleState.Gear.D && sport) s.gear!!.label else g.label
+        Spacer(Modifier.weight(1f))
+        Column(horizontalAlignment = Alignment.End) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(ampm.format(now), style = Dash.UnitText, modifier = Modifier.padding(end = 4.dp, bottom = 5.dp))
+                Text(time.format(now), style = Dash.Clock)
+            }
+            Text(date.format(now), style = Dash.Caption.copy(color = Dash.TextSecondary))
+        }
+        Spacer(Modifier.width(10.dp))
+        Box(
+            Modifier.size(40.dp).glass(radius = 20.dp).clickable(onClick = onSettings),
+            contentAlignment = Alignment.Center
+        ) { Icon(Icons.Filled.Settings, "الإعدادات", tint = Dash.TextSecondary, modifier = Modifier.size(20.dp)) }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hero: environment | speed + gear | fuel
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun HeroRow(s: VehicleState, accent: Color) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).glass().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            MiniStat(Icons.Filled.Thermostat, s.outsideTempC?.toString() ?: "--", "°C", "برّه", accent)
+            MiniStat(Icons.Filled.Thermostat, s.coolantTempC?.toString() ?: "--", "°C", "حرارة المحرك",
+                if ((s.coolantTempC ?: 0) >= 110) Dash.Danger else accent)
+        }
+        Column(Modifier.weight(1.25f), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(s.speedKmh?.toString() ?: "--", style = Dash.Hero)
+            Text("كم/س", style = Dash.UnitText, modifier = Modifier.offset(y = (-8).dp))
+            GearSelector(s.gear, accent)
+        }
+        Column(Modifier.weight(1f).glass().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val pct = s.fuelPercent
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.LocalGasStation, null, tint = fuelColor(pct, accent), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(pct?.let { "${it.toInt()}%" } ?: "--", style = Dash.Value)
+            }
+            FuelGauge(pct, accent)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(s.rangeKm?.toInt()?.toString() ?: "--", style = Dash.ValueSmall)
+                Text(" كم متبقي", style = Dash.Label)
+            }
+        }
+    }
+}
+
+private fun fuelColor(pct: Float?, accent: Color) = when {
+    pct == null -> Dash.TextTertiary
+    pct < 12f -> Dash.Danger
+    pct < 25f -> Dash.Warn
+    else -> accent
+}
+
+@Composable
+private fun MiniStat(icon: ImageVector, value: String, unit: String, label: String, tint: Color) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(value, style = Dash.Value)
+            Text(unit, style = Dash.UnitText, modifier = Modifier.padding(start = 2.dp))
+        }
+        Text(label, style = Dash.Caption)
+    }
+}
+
+@Composable
+private fun FuelGauge(pct: Float?, accent: Color) {
+    val f by animateFloatAsState(((pct ?: 0f) / 100f).coerceIn(0f, 1f), tween(800), label = "fuel")
+    val c = fuelColor(pct, accent)
+    Box(
+        Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(Dash.Divider)
+            .drawBehind {
+                drawRoundRect(
+                    Brush.horizontalGradient(listOf(c.copy(alpha = 0.55f), c)),
+                    size = Size(size.width * f, size.height),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2)
+                )
+            }
+    )
+}
+
+@Composable
+private fun GearSelector(gear: VehicleState.Gear?, accent: Color) {
+    val gears = listOf(VehicleState.Gear.P, VehicleState.Gear.R, VehicleState.Gear.N, VehicleState.Gear.D)
+    val sport = gear == VehicleState.Gear.S || gear == VehicleState.Gear.B
+    val index = when {
+        sport -> 3
+        else -> gears.indexOf(gear)
+    }
+    val cell = 36.dp
+    val x by animateDpAsState(cell * maxOf(index, 0), spring(stiffness = 500f), label = "gear")
+    // Gear order is a physical sequence: keep it left-to-right even in RTL.
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Box(Modifier.glass(radius = 14.dp).padding(4.dp)) {
+            if (index >= 0) {
                 Box(
-                    Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (active) accent.copy(alpha = 0.25f) else PanelBg)
-                        .border(1.dp, if (active) accent else Color.Transparent, RoundedCornerShape(8.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(label, color = if (active) accent else TextDim, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Modifier.offset(x = x).size(cell, 30.dp).clip(RoundedCornerShape(10.dp))
+                        .background(accent.copy(alpha = 0.22f))
+                        .border(1.dp, accent.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
+                )
+            }
+            Row {
+                gears.forEachIndexed { i, g ->
+                    val active = i == index
+                    Box(Modifier.size(cell, 30.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            if (g == VehicleState.Gear.D && sport) gear!!.label else g.label,
+                            color = if (active) accent else Dash.TextTertiary,
+                            fontSize = 16.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
                 }
             }
         }
@@ -326,95 +454,335 @@ private fun SpeedGearRow(s: VehicleState, accent: Color) {
 }
 
 // ---------------------------------------------------------------------------
-// Light indicators
+// Tell-tales
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun IndicatorBar(l: VehicleState.Lights, accent: Color) {
-    val blink by rememberInfiniteTransition(label = "ind").animateFloat(
-        0f, 1f, infiniteRepeatable(tween(420), RepeatMode.Reverse), label = "indA"
+private fun TelltaleBar(l: VehicleState.Lights) {
+    var blinkOn by remember { mutableStateOf(true) }
+    val blinking = l.turnLeft || l.turnRight || l.hazard
+    if (blinking) LaunchedEffect(Unit) { while (true) { delay(420); blinkOn = !blinkOn } }
+    val on = !blinking || blinkOn
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Row(
+            Modifier.fillMaxWidth().glass(radius = 28.dp).padding(horizontal = 18.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TelltaleIcon(Telltale.TURN_LEFT, (l.turnLeft || l.hazard) && on, Dash.Signal)
+            TelltaleIcon(Telltale.HAZARD, l.hazard && on, Dash.Danger)
+            TelltaleIcon(Telltale.POSITION, l.position, Dash.Signal)
+            TelltaleIcon(Telltale.LOW_BEAM, l.lowBeam, Dash.Signal)
+            TelltaleIcon(Telltale.HIGH_BEAM, l.highBeam, Dash.HighBeam)
+            TelltaleIcon(Telltale.FOG_FRONT, l.fogFront, Dash.Signal)
+            TelltaleIcon(Telltale.FOG_REAR, l.fogRear, Dash.Warn)
+            TelltaleIcon(Telltale.TURN_RIGHT, (l.turnRight || l.hazard) && on, Dash.Signal)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stage: spotlight + floor, control rail, TPMS, notices
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun StageLight(accent: Color) {
+    Box(
+        Modifier.fillMaxSize().drawBehind {
+            val c = Offset(size.width / 2f, size.height * 0.48f)
+            // Accent spotlight behind the car
+            drawCircle(
+                Brush.radialGradient(listOf(accent.copy(alpha = 0.20f), accent.copy(alpha = 0.06f), Color.Transparent), c, size.minDimension * 0.62f),
+                radius = size.minDimension * 0.62f, center = c
+            )
+            // Studio floor: soft elliptical light pool under the wheels
+            val floorH = size.height * 0.20f
+            val floorTop = size.height * 0.62f
+            drawOval(
+                Brush.radialGradient(
+                    listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.03f), Color.Transparent),
+                    center = Offset(size.width / 2f, floorTop + floorH / 2f), radius = size.width * 0.48f
+                ),
+                topLeft = Offset(size.width * 0.04f, floorTop), size = Size(size.width * 0.92f, floorH)
+            )
+            // Thin horizon line
+            drawLine(
+                Brush.horizontalGradient(listOf(Color.Transparent, accent.copy(alpha = 0.25f), Color.Transparent)),
+                Offset(0f, floorTop + floorH * 0.5f), Offset(size.width, floorTop + floorH * 0.5f), strokeWidth = 1.2f
+            )
+        }
     )
-    val on = blink > 0.5f
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
-            .background(PanelBg)
-            .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(28.dp))
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IndicatorIcon(Icons.Filled.ArrowBack, (l.turnLeft || l.hazard) && on, Ok)
-        IndicatorText("⚠", l.hazard && on, Color(0xFFFF6A3D), "انتظار")
-        IndicatorText("≡D", l.fogFront, Ok, "ضباب أمامي")
-        IndicatorText("≡O", l.fogRear, Amber, "ضباب خلفي")
-        IndicatorText("◐", l.position, Ok, "جانبي")
-        IndicatorText("▼", l.lowBeam, Ok, "عادي")
-        IndicatorText("▲", l.highBeam, Color(0xFF4D9DFF), "عالي")
-        IndicatorIcon(Icons.Filled.ArrowForward, (l.turnRight || l.hazard) && on, Ok)
-    }
 }
 
 @Composable
-private fun IndicatorIcon(icon: ImageVector, active: Boolean, color: Color) {
-    Icon(icon, null, tint = if (active) color else TextDim.copy(alpha = 0.35f), modifier = Modifier.size(24.dp))
-}
-
-@Composable
-private fun IndicatorText(glyph: String, active: Boolean, color: Color, label: String) {
-    val c = if (active) color else TextDim.copy(alpha = 0.35f)
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(glyph, color = c, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = c, fontSize = 8.sp)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Controls next to the model
-// ---------------------------------------------------------------------------
-
-@Composable
-private fun ControlColumn(
-    state: VehicleState,
+private fun ControlRail(
+    s: VehicleState,
     accent: Color,
+    available: (Control) -> Boolean,
     onWindowsAll: () -> Unit,
     onSunroof: () -> Unit,
-    onTrunk: () -> Unit
+    onTrunk: () -> Unit,
+    modifier: Modifier
 ) {
-    val w = state.windows
+    val w = s.windows
     Column(
-        Modifier.fillMaxHeight().padding(top = 12.dp, end = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier.glass(radius = 24.dp).padding(vertical = 8.dp, horizontal = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        val windowsAvail = Control.WINDOWS.any { VehicleRepository.isAvailable(it) }
-        ControlButton(
-            Icons.Filled.Window, if (w.open.any { it > 0.5f }) "اقفل الشبابيك" else "افتح الشبابيك",
-            w.open.any { it > 0.05f }, windowsAvail, accent, onWindowsAll
-        )
-        val sunAvail = VehicleRepository.isAvailable(Control.SUNROOF) || VehicleRepository.isAvailable(Control.SUNROOF_TILT)
-        ControlButton(Icons.Filled.WbSunny, "فتحة السقف", w.sunroofOpen > 0.05f || w.sunroofTilt, sunAvail, accent, onSunroof)
-        ControlButton(Icons.Filled.Luggage, "الشنطة", state.doors.trunk, VehicleRepository.isAvailable(Control.TRUNK), accent, onTrunk)
+        RailButton(Icons.Filled.Window, "الشبابيك", w.open.any { it > 0.05f }, Control.WINDOWS.any(available), accent, onWindowsAll)
+        RailButton(Icons.Filled.WbSunny, "السقف", w.sunroofOpen > 0.05f || w.sunroofTilt, available(Control.SUNROOF) || available(Control.SUNROOF_TILT), accent, onSunroof)
+        RailButton(Icons.Filled.Luggage, "الشنطة", s.doors.trunk, available(Control.TRUNK), accent, onTrunk)
     }
 }
 
 @Composable
-private fun ControlButton(icon: ImageVector, label: String, active: Boolean, available: Boolean, accent: Color, onClick: () -> Unit) {
+private fun RailButton(icon: ImageVector, label: String, active: Boolean, enabled: Boolean, accent: Color, onClick: () -> Unit) {
+    val bg by animateFloatAsState(if (active) 1f else 0f, tween(300), label = "rail")
     Column(
         Modifier
-            .width(62.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (active) accent.copy(alpha = 0.22f) else PanelBg)
-            .border(1.dp, if (active) accent else accent.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick) // still clickable when unavailable: the toast explains why
-            .alpha(if (available) 1f else 0.45f)
-            .padding(vertical = 8.dp),
+            .width(64.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(accent.copy(alpha = 0.20f * bg))
+            .clickable(onClick = onClick) // still tappable when unavailable: the notice explains why
+            .alpha(if (enabled) 1f else 0.5f)
+            .padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(icon, null, tint = if (active) accent else TextMain, modifier = Modifier.size(24.dp))
-        Text(label, color = TextMain, fontSize = 9.sp, textAlign = TextAlign.Center, lineHeight = 11.sp)
+        Icon(icon, null, tint = if (active) accent else Dash.TextPrimary, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(label, style = Dash.Caption.copy(color = if (active) accent else Dash.TextSecondary))
+        Box(Modifier.padding(top = 4.dp).size(4.dp).clip(CircleShape).background(if (active) accent else Color.Transparent))
     }
 }
+
+@Composable
+private fun TpmsButton(t: VehicleState.Tpms?, active: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    val c = when {
+        t == null -> Dash.TextTertiary
+        t.anyWarning -> Dash.Danger
+        else -> Dash.Ok
+    }
+    Row(
+        modifier.glass(radius = 18.dp, tint = if (active) c else null).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(7.dp).clip(CircleShape).background(c))
+        Spacer(Modifier.width(8.dp))
+        Text("TPMS", color = c, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+    }
+}
+
+@Composable
+private fun TpmsOverlay(t: VehicleState.Tpms?, unit: String) {
+    if (t == null) return
+    Box(Modifier.fillMaxSize().padding(start = 84.dp, top = 8.dp, bottom = 48.dp)) {
+        TireChip(t, 0, "أمامي شمال", unit, Modifier.align(Alignment.TopStart))
+        TireChip(t, 1, "أمامي يمين", unit, Modifier.align(Alignment.TopEnd))
+        TireChip(t, 2, "خلفي شمال", unit, Modifier.align(Alignment.BottomStart))
+        TireChip(t, 3, "خلفي يمين", unit, Modifier.align(Alignment.BottomEnd))
+    }
+}
+
+@Composable
+private fun TireChip(t: VehicleState.Tpms, i: Int, name: String, unit: String, modifier: Modifier) {
+    val warn = t.warning.getOrElse(i) { false }
+    val kpa = t.pressureKpa.getOrElse(i) { 0f }
+    val value = when (unit) {
+        "kpa" -> "${kpa.toInt()}"
+        "psi" -> String.format(Locale.US, "%.0f", kpa * 0.145038f)
+        else -> String.format(Locale.US, "%.1f", kpa / 100f)
+    }
+    val unitLabel = when (unit) { "kpa" -> "kPa"; "psi" -> "psi"; else -> "bar" }
+    val c = if (warn) Dash.Danger else Dash.Ok
+    Column(modifier.glass(radius = 14.dp, tint = if (warn) Dash.Danger else null).padding(horizontal = 12.dp, vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(value, style = Dash.ValueSmall.copy(color = c))
+            Text(" $unitLabel", style = Dash.UnitText)
+        }
+        Text("$name · ${t.tempC.getOrElse(i) { 0f }.toInt()}°", style = Dash.Caption)
+    }
+}
+
+@Composable
+private fun DoorWarning(d: VehicleState.Doors) {
+    AnimatedVisibility(d.anyOpen, enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it }) {
+        val open = buildList {
+            if (d.frontLeft) add("أمامي شمال")
+            if (d.frontRight) add("أمامي يمين")
+            if (d.rearLeft) add("خلفي شمال")
+            if (d.rearRight) add("خلفي يمين")
+            if (d.trunk) add("الشنطة")
+            if (d.hood) add("الكبوت")
+        }
+        Row(
+            Modifier.padding(bottom = 8.dp).glass(radius = 16.dp, tint = Dash.Warn).padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Filled.Warning, null, tint = Dash.Warn, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("مفتوح: ${open.joinToString("، ")}", style = Dash.Label.copy(color = Dash.TextPrimary))
+        }
+    }
+}
+
+@Composable
+private fun NoticePill(notice: Notice?, onShown: () -> Unit, modifier: Modifier) {
+    var shown by remember { mutableStateOf<Notice?>(null) }
+    LaunchedEffect(notice) {
+        if (notice != null) {
+            shown = notice
+            delay(2600)
+            shown = null
+            onShown()
+        }
+    }
+    AnimatedVisibility(shown != null, modifier = modifier, enter = fadeIn() + slideInVertically { -it }, exit = fadeOut() + slideOutVertically { -it }) {
+        val n = shown ?: return@AnimatedVisibility
+        val c = if (n.ok) Dash.Ok else Dash.Warn
+        Row(
+            Modifier.glass(radius = 18.dp, strong = true, tint = c).padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(c))
+            Spacer(Modifier.width(8.dp))
+            Text(n.text, style = Dash.Label.copy(color = Dash.TextPrimary), maxLines = 2)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Trip / consumption card
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun TripCard(s: VehicleState, accent: Color) {
+    Row(
+        Modifier.fillMaxWidth().glass().padding(horizontal = 6.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val litres = s.fuelLitres?.let { l -> s.fuelCapacityLitres?.let { "${l.toInt()}/${it.toInt()}" } ?: "${l.toInt()}" }
+        TripStat(litres ?: "--", "لتر", "في الخزان")
+        StatDivider()
+        TripStat(s.rangeKm?.toInt()?.toString() ?: "--", "كم", "المسافة المتبقية", accent)
+        StatDivider()
+        TripStat(fmt(s.instantConsumption, 1), "", "استهلاك لحظي")
+        StatDivider()
+        TripStat(fmt(s.avgConsumption, 1), "", "متوسط الاستهلاك")
+    }
+}
+
+@Composable
+private fun RowScope.TripStat(value: String, unit: String, label: String, valueColor: Color = Dash.TextPrimary) {
+    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(value, style = Dash.Value.copy(color = valueColor))
+            if (unit.isNotEmpty()) Text(" $unit", style = Dash.UnitText)
+        }
+        Text(label, style = Dash.Caption, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun StatDivider() {
+    Box(Modifier.width(1.dp).height(30.dp).background(Dash.Divider))
+}
+
+// ---------------------------------------------------------------------------
+// Media
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun MediaCard(np: NowPlayingUi?, accent: Color, onMedia: ((android.media.session.MediaController.TransportControls) -> Unit) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().glass().padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(46.dp).clip(RoundedCornerShape(14.dp))
+                .background(Brush.linearGradient(listOf(accent.copy(alpha = 0.55f), accent.copy(alpha = 0.12f)))),
+            contentAlignment = Alignment.Center
+        ) { Icon(Icons.Filled.MusicNote, null, tint = Dash.TextPrimary, modifier = Modifier.size(22.dp)) }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(np?.title?.ifBlank { null } ?: "مفيش حاجة شغالة", style = Dash.ValueSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(np?.artist.orEmpty().ifBlank { "اختار أغنية من الميديا" }, style = Dash.Label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            np?.progress?.let { p ->
+                Box(Modifier.padding(top = 6.dp).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Dash.Divider)) {
+                    Box(Modifier.fillMaxWidth(p.coerceIn(0f, 1f)).fillMaxHeight().background(accent))
+                }
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                MediaButton(Icons.Filled.SkipPrevious, 38.dp, accent) { onMedia { it.skipToPrevious() } }
+                MediaButton(if (np?.playing == true) Icons.Filled.Pause else Icons.Filled.PlayArrow, 48.dp, accent, filled = true) {
+                    onMedia { if (np?.playing == true) it.pause() else it.play() }
+                }
+                MediaButton(Icons.Filled.SkipNext, 38.dp, accent) { onMedia { it.skipToNext() } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaButton(icon: ImageVector, size: Dp, accent: Color, filled: Boolean = false, onClick: () -> Unit) {
+    Box(
+        Modifier.padding(horizontal = 3.dp).size(size).clip(CircleShape)
+            .background(if (filled) accent else Color.Transparent)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, null, tint = if (filled) Color(0xFF041014) else Dash.TextPrimary, modifier = Modifier.size(size * 0.55f))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Quick apps
+// ---------------------------------------------------------------------------
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickBar(
+    apps: List<QuickAppUi>,
+    accent: Color,
+    onClick: (QuickSlot) -> Unit,
+    onLong: (QuickSlot) -> Unit,
+    onOpenDrawer: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().glass(radius = 26.dp).padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly
+    ) {
+        apps.forEach { a ->
+            QuickButton(a.slot.icon, a.appLabel?.take(10) ?: a.slot.label, accent, a.appLabel != null, { onClick(a.slot) }, { onLong(a.slot) })
+        }
+        QuickButton(Icons.Filled.Apps, "التطبيقات", accent, true, onOpenDrawer, onOpenDrawer)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickButton(icon: ImageVector, label: String, accent: Color, configured: Boolean, onClick: () -> Unit, onLong: () -> Unit) {
+    Column(
+        Modifier.clip(RoundedCornerShape(16.dp)).combinedClickable(onClick = onClick, onLongClick = onLong).padding(horizontal = 6.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier.size(46.dp).clip(RoundedCornerShape(15.dp))
+                .background(if (configured) accent.copy(alpha = 0.16f) else Dash.Glass)
+                .border(1.dp, if (configured) accent.copy(alpha = 0.35f) else Dash.GlassBorder, RoundedCornerShape(15.dp)),
+            contentAlignment = Alignment.Center
+        ) { Icon(icon, null, tint = if (configured) accent else Dash.TextSecondary, modifier = Modifier.size(22.dp)) }
+        Spacer(Modifier.height(4.dp))
+        Text(label, style = Dash.Caption.copy(color = Dash.TextSecondary), maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dialogs & helpers
+// ---------------------------------------------------------------------------
 
 @Composable
 private fun SunroofDialog(w: VehicleState.Windows, onDismiss: () -> Unit, onAction: (Control, Boolean) -> Unit) {
@@ -443,308 +811,38 @@ private fun SunroofDialog(w: VehicleState.Windows, onDismiss: () -> Unit, onActi
     )
 }
 
-// ---------------------------------------------------------------------------
-// TPMS + door warning
-// ---------------------------------------------------------------------------
-
+/** Polls the active media session once a second (needs notification-listener access). */
 @Composable
-private fun TpmsCorners(t: VehicleState.Tpms?, unit: String) {
-    if (t == null) return
-    Box(Modifier.fillMaxSize().padding(4.dp)) {
-        TireLabel(t, 0, "أ.ش", unit, Modifier.align(Alignment.TopStart))
-        TireLabel(t, 1, "أ.ي", unit, Modifier.align(Alignment.TopEnd))
-        TireLabel(t, 2, "خ.ش", unit, Modifier.align(Alignment.BottomStart).padding(bottom = 22.dp))
-        TireLabel(t, 3, "خ.ي", unit, Modifier.align(Alignment.BottomEnd).padding(bottom = 22.dp))
-    }
-}
-
-@Composable
-private fun TpmsButton(tpms: VehicleState.Tpms?, active: Boolean, onClick: () -> Unit, modifier: Modifier) {
-    val warn = tpms?.anyWarning == true
-    val color = when {
-        tpms == null -> TextDim
-        warn -> Warn
-        else -> Ok
-    }
-    Row(
-        modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (active) color.copy(alpha = 0.18f) else PanelBg)
-            .border(1.5.dp, color.copy(alpha = 0.8f), RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text("(!) ", color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        Text("TPMS", color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun TireLabel(t: VehicleState.Tpms, i: Int, name: String, unit: String, modifier: Modifier) {
-    val warn = t.warning.getOrElse(i) { false }
-    val kpa = t.pressureKpa.getOrElse(i) { 0f }
-    val value = when (unit) {
-        "kpa" -> "${kpa.toInt()} kPa"
-        "psi" -> String.format(Locale.US, "%.0f psi", kpa * 0.145038f)
-        else -> String.format(Locale.US, "%.1f bar", kpa / 100f)
-    }
-    val color = if (warn) Warn else Ok
-    Column(
-        modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(PanelBg)
-            .border(1.dp, color.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(value, color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        Text("$name · ${t.tempC.getOrElse(i) { 0f }.toInt()}°C", color = TextDim, fontSize = 10.sp)
-    }
-}
-
-@Composable
-private fun DoorWarning(d: VehicleState.Doors) {
-    if (!d.anyOpen) return
-    val open = buildList {
-        if (d.frontLeft) add("أمامي شمال")
-        if (d.frontRight) add("أمامي يمين")
-        if (d.rearLeft) add("خلفي شمال")
-        if (d.rearRight) add("خلفي يمين")
-        if (d.trunk) add("الشنطة")
-        if (d.hood) add("الكبوت")
-    }
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(Warn.copy(alpha = 0.18f))
-            .padding(horizontal = 12.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(Icons.Filled.Warning, null, tint = Warn, modifier = Modifier.size(16.dp))
-        Text(" مفتوح: ${open.joinToString("، ")}", color = TextMain, fontSize = 12.sp)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Fuel card
-// ---------------------------------------------------------------------------
-
-@Composable
-private fun FuelCard(s: VehicleState) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(PanelBg)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(Icons.Filled.LocalGasStation, null, tint = Amber, modifier = Modifier.size(26.dp))
-        val litres = s.fuelLitres?.let { l ->
-            s.fuelCapacityLitres?.let { "${l.toInt()}/${it.toInt()}" } ?: "${l.toInt()}"
-        } ?: s.fuelPercent?.let { "${it.toInt()}%" } ?: "--"
-        FuelStat(litres, if (s.fuelLitres != null) "لتر" else "الخزان")
-        FuelStat(s.rangeKm?.toInt()?.toString() ?: "--", "كم متبقي")
-        FuelStat(fmt(s.instantConsumption, 1), "لحظي")
-        FuelStat(fmt(s.avgConsumption, 1), "متوسط")
-    }
-}
-
-@Composable
-private fun FuelStat(value: String, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, color = TextMain, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = TextDim, fontSize = 10.sp)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Quick apps
-// ---------------------------------------------------------------------------
-
-private data class QuickSlot(val id: String, val label: String, val icon: ImageVector)
-
-private val QUICK_SLOTS = listOf(
-    QuickSlot("media", "ميديا", Icons.Filled.MusicNote),
-    QuickSlot("maps", "خرائط", Icons.Filled.Map),
-    QuickSlot("camera", "كاميرا", Icons.Filled.CameraAlt),
-    QuickSlot("camera360", "360°", Icons.Filled.Videocam)
-)
-
-@Composable
-private fun QuickAppsBar(viewModel: LauncherViewModel, onLaunch: (AppInfo) -> Unit, onOpenDrawer: () -> Unit, accent: Color) {
-    val prefs = viewModel.prefs
-    var picking by remember { mutableStateOf<QuickSlot?>(null) }
-    val version = viewModel.settingsVersion
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(PanelBg)
-            .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(22.dp))
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly
-    ) {
-        QUICK_SLOTS.forEach { slot ->
-            val app = remember(version, viewModel.allApps) { prefs.quickApp(slot.id)?.let { viewModel.appByKey(it) } }
-            QuickButton(
-                slot.icon, app?.label?.take(10) ?: slot.label,
-                onClick = { if (app != null) onLaunch(app) else picking = slot },
-                onLongClick = { picking = slot }
-            )
-        }
-        QuickButton(Icons.Filled.Apps, "التطبيقات", onClick = onOpenDrawer, onLongClick = onOpenDrawer)
-    }
-    picking?.let { slot ->
-        AppPickerDialog(
-            title = "اختار تطبيق «${slot.label}» (ضغطة طويلة تغيّره بعدين)",
-            apps = viewModel.allApps,
-            onDismiss = { picking = null },
-            onPick = { app ->
-                prefs.setQuickApp(slot.id, app.key)
-                viewModel.notifySettingsChanged()
-                picking = null
-            }
-        )
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun QuickButton(icon: ImageVector, label: String, onClick: () -> Unit, onLongClick: () -> Unit) {
-    Column(
-        Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Icon(icon, null, tint = TextMain, modifier = Modifier.size(26.dp))
-        Text(label, color = TextDim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Status
-// ---------------------------------------------------------------------------
-
-@Composable
-private fun StatusRow(s: VehicleState, writeVerified: Boolean, onOpenDiagnostics: () -> Unit, onOpenSettings: () -> Unit) {
-    val (label, color) = when (s.source) {
-        VehicleState.Source.LIVE -> (if (writeVerified) "CAN مباشر · تحكم متاح" else "CAN مباشر · قراءة بس") to Ok
-        VehicleState.Source.DEMO -> "وضع العرض" to Amber
-        VehicleState.Source.NONE -> "مفيش اتصال بالعربية" to TextDim
-    }
-    Row(
-        Modifier.fillMaxWidth().padding(top = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            Modifier
-                .clip(RoundedCornerShape(14.dp))
-                .background(PanelBg)
-                .clickable(onClick = onOpenDiagnostics)
-                .padding(horizontal = 10.dp, vertical = 3.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-            Text("  $label", color = TextMain, fontSize = 11.sp)
-        }
-        Text(
-            listOfNotNull(
-                s.odometerKm?.let { "عدّاد ${it.toInt()} كم" },
-                s.batteryVolts?.let { String.format(Locale.US, "%.1fV", it) },
-                s.rpm?.let { "$it RPM" }
-            ).joinToString("  ·  "),
-            color = TextDim, fontSize = 11.sp,
-            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-            textAlign = TextAlign.Center
-        )
-        Icon(
-            Icons.Filled.Settings, contentDescription = "الإعدادات", tint = TextDim,
-            modifier = Modifier.size(28.dp).clip(CircleShape).clickable(onClick = onOpenSettings).padding(4.dp)
-        )
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Now playing
-// ---------------------------------------------------------------------------
-
-private data class NowPlaying(val title: String, val artist: String, val playing: Boolean, val controller: MediaController?)
-
-@Composable
-private fun NowPlayingCard(accent: Color) {
+private fun rememberNowPlaying(): androidx.compose.runtime.State<NowPlayingUi?> {
     val context = LocalContext.current
-    var np by remember { mutableStateOf<NowPlaying?>(null) }
-    var noAccess by remember { mutableStateOf(false) }
+    val state = remember { mutableStateOf<NowPlayingUi?>(null) }
     LaunchedEffect(Unit) {
         while (true) {
-            val r = readNowPlaying(context)
-            noAccess = r == null
-            np = r?.getOrNull()
+            state.value = readNowPlaying(context)
             delay(1000)
         }
     }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(PanelBg)
-            .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                np?.title ?: if (noAccess) "فعّل \"الوصول للإشعارات\" عشان تظهر الأغنية" else "مفيش حاجة شغالة",
-                color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis
-            )
-            Text(np?.artist.orEmpty(), color = TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        val tc = np?.controller?.transportControls
-        MediaButton(Icons.Filled.SkipPrevious, 32.dp, accent) { tc?.skipToPrevious() }
-        MediaButton(if (np?.playing == true) Icons.Filled.Pause else Icons.Filled.PlayArrow, 42.dp, accent, filled = true) {
-            if (np?.playing == true) tc?.pause() else tc?.play()
-        }
-        MediaButton(Icons.Filled.SkipNext, 32.dp, accent) { tc?.skipToNext() }
-    }
+    return state
 }
 
-@Composable
-private fun MediaButton(icon: ImageVector, size: Dp, accent: Color, filled: Boolean = false, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .padding(start = 8.dp)
-            .size(size)
-            .clip(CircleShape)
-            .background(if (filled) accent else PanelBg)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(icon, null, tint = if (filled) Color.Black else TextMain, modifier = Modifier.fillMaxHeight(0.6f))
-    }
-}
-
-/** null = no notification-listener access; Result(null) = nothing playing. */
-private fun readNowPlaying(context: Context): Result<NowPlaying?>? = try {
+private fun readNowPlaying(context: Context): NowPlayingUi? = try {
     val manager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
     val controllers = manager.getActiveSessions(ComponentName(context, NotificationBadgeService::class.java))
     val c = controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: controllers.firstOrNull()
-    Result.success(c?.let {
+    c?.let {
         val md = it.metadata
-        NowPlaying(
+        val duration = md?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        val position = it.playbackState?.position ?: 0L
+        NowPlayingUi(
             title = md?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "",
             artist = md?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "",
             playing = it.playbackState?.state == PlaybackState.STATE_PLAYING,
+            progress = if (duration > 0) position.toFloat() / duration else null,
             controller = it
         )
-    })
-} catch (_: SecurityException) {
+    }
+} catch (_: Throwable) {
+    // No notification-listener access yet (SecurityException) or no media service.
     null
 }
 

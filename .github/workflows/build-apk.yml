@@ -56,3 +56,19 @@ jobs:
             آخر نسخة اتبنت تلقائياً من الفرع ${{ github.ref_name }}
             commit: ${{ github.sha }}
           files: shine-launcher.apk
+
+      # Off-device screenshots of the dashboard (Paparazzi) for design review.
+      - name: Render UI screenshots
+        id: snapshots
+        continue-on-error: true
+        run: ./gradlew recordPaparazziDebug --stacktrace && mkdir -p ui-preview && cp app/src/test/snapshots/images/*.png ui-preview/
+
+      - name: Publish UI screenshots
+        if: steps.snapshots.outcome == 'success'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ui-preview
+          name: UI preview (latest build)
+          prerelease: true
+          body: Dashboard screenshots rendered by Paparazzi from ${{ github.sha }}
+          files: ui-preview/*.png

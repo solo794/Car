@@ -37,7 +37,12 @@ const GLASS_RGB = [0.553, 0.627, 0.604];
 function isGlass(cy, uv) {
   if (cy < 0.24) return false;
   const [R, G, B] = texRGB(uv[0], uv[1]);
-  return Math.abs(R - GLASS_RGB[0]) + Math.abs(G - GLASS_RGB[1]) + Math.abs(B - GLASS_RGB[2]) < 0.06;
+  if (Math.abs(R - GLASS_RGB[0]) + Math.abs(G - GLASS_RGB[1]) + Math.abs(B - GLASS_RGB[2]) < 0.06) return true;
+  // Same greenish-grey hue at any brightness (the rear window is painted darker).
+  if (cy > 0.29 && R > 0.12 && R < 0.66 && Math.abs(G / R - 1.135) < 0.06 && Math.abs(B / R - 1.095) < 0.07) return true;
+  // Reflections the artist painted onto the glass (near-white, unsaturated) are glass too.
+  const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+  return cy > 0.29 && mn > 0.62 && mx - mn < 0.10;
 }
 
 function classify(cx, cy, cz, ny, uv) {
@@ -86,6 +91,9 @@ const parts = {}; // name -> { pos:[], nor:[], uv:[], tan:[], idx:[] }
 function part(name) {
   return parts[name] ??= { pos: [], nor: [], uv: [], tan: [], idx: [], map: new Map() };
 }
+const roofPts = [];
+pivots.roof = [0, 0, 0];
+pivots.roof_cutout = [0, 0, 0];
 const meshNodes = [];
 scene.traverse(n => { if (n.getMesh()) meshNodes.push(n); });
 let primId = 0;
@@ -121,7 +129,10 @@ for (const node of meshNodes) {
       const uv = T ? [(T[a * 2] + T[b * 2] + T[c * 2]) / 3, (T[a * 2 + 1] + T[b * 2 + 1] + T[c * 2 + 1]) / 3] : [0, 0];
       const base = classify(cx, cy, cz, ny, uv);
       const glass = !base.startsWith('wheel') && !base.startsWith('caliper') && isGlass(cy, uv);
-      const name = glass ? base + '|glass' : base;
+      const roofSkin = glass && base === 'body' && cy > 0.393;
+      const inSunroof = roofSkin && Math.abs(cx) < 0.103 && cz < 0.043 && cz > -0.158;
+      const name = inSunroof ? 'roof_cutout' : roofSkin ? 'roof' : glass ? base + '|glass' : base;
+      if (roofSkin) for (const v of [a, b, c]) roofPts.push(wp[v * 3], wp[v * 3 + 1], wp[v * 3 + 2]);
       const pp = part(name), pv = pivots[base];
       for (const v of [a, b, c]) {
         const key = primId * 4194304 + v;
@@ -150,7 +161,10 @@ for (const n of scene.listChildren()) n.dispose();
 root.listMeshes().forEach(m => m.dispose());
 const buffer = root.listBuffers()[0];
 // Root scaled to metres (real car length 4.68 m) and named so the app can find it.
-const carNode = doc.createNode('car').setScale([3.983, 3.983, 3.983]);
+// Root stays in model units (car is 1.175 long): gltfio's bounding box comes
+// from accessor min/max and ignores node transforms, so a root scale would
+// make the app mis-frame the car. (1 unit = 3.983 m.)
+const carNode = doc.createNode('car');
 scene.addChild(carNode);
 const steerNodes = {};
 for (const k of Object.keys(WHEELS)) {
@@ -165,17 +179,33 @@ const glassMat = doc.createMaterial('glass')
   .setRoughnessFactor(0.04)
   .setAlphaMode('BLEND')
   .setDoubleSided(true);
+const roofMat = doc.createMaterial('roof_black')
+  .setBaseColorFactor([0.010, 0.011, 0.013, 1])
+  .setMetallicFactor(0.0)
+  .setRoughnessFactor(0.14);
+const sunroofGlassMat = doc.createMaterial('sunroof_glass')
+  .setBaseColorFactor([0.006, 0.010, 0.014, 0.88])
+  .setMetallicFactor(0.0)
+  .setRoughnessFactor(0.03)
+  .setAlphaMode('BLEND')
+  .setDoubleSided(true);
+const holeMat = doc.createMaterial('sunroof_opening')
+  .setBaseColorFactor([0.004, 0.004, 0.005, 1])
+  .setMetallicFactor(0.0)
+  .setRoughnessFactor(0.9)
+  .setDoubleSided(true);
 const partNodes = {};
 const counts = {};
 for (const [name, pp] of Object.entries(parts)) {
   const isGlassPart = name.endsWith('|glass');
   const baseName = name.replace('|glass', '');
-  const prim = doc.createPrimitive().setMaterial(isGlassPart ? glassMat : material)
+  const isRoof = name === 'roof' || name === 'roof_cutout';
+  const prim = doc.createPrimitive().setMaterial(isGlassPart ? glassMat : isRoof ? roofMat : material)
     .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array(pp.pos)).setBuffer(buffer))
     .setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint32Array(pp.idx)).setBuffer(buffer));
   if (pp.nor.length) prim.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setArray(new Float32Array(pp.nor)).setBuffer(buffer));
-  if (pp.uv.length && !isGlassPart) prim.setAttribute('TEXCOORD_0', doc.createAccessor().setType('VEC2').setArray(new Float32Array(pp.uv)).setBuffer(buffer));
-  if (pp.tan.length && !isGlassPart) prim.setAttribute('TANGENT', doc.createAccessor().setType('VEC4').setArray(new Float32Array(pp.tan)).setBuffer(buffer));
+  if (pp.uv.length && !isGlassPart && !isRoof) prim.setAttribute('TEXCOORD_0', doc.createAccessor().setType('VEC2').setArray(new Float32Array(pp.uv)).setBuffer(buffer));
+  if (pp.tan.length && !isGlassPart && !isRoof) prim.setAttribute('TANGENT', doc.createAccessor().setType('VEC4').setArray(new Float32Array(pp.tan)).setBuffer(buffer));
   const door = baseName.match(/^door_(\w\w)$/);
   const nodeName = isGlassPart ? (door ? 'glass_' + door[1] : baseName + '_glass') : baseName;
   const node = doc.createNode(nodeName).setMesh(doc.createMesh(nodeName).addPrimitive(prim));
@@ -192,8 +222,49 @@ for (const [name, pp] of Object.entries(parts)) {
   counts[nodeName] = pp.idx.length / 3;
 }
 for (const n of Object.values(partNodes)) if (!n.getParentNode()) carNode.addChild(n);
+
+// ---------- sunroof: a glass panel shaped to the roof, pivoted on its front edge ----------
+const SR = { x: 0.105, zf: 0.045, zr: -0.160, nx: 10, nz: 14 };
+function roofY(x, z) {
+  let best = -1, r = 0.008;
+  while (best < 0 && r < 0.05) {
+    for (let i = 0; i < roofPts.length; i += 3) {
+      if (Math.abs(roofPts[i] - x) < r && Math.abs(roofPts[i + 2] - z) < r && roofPts[i + 1] > best) best = roofPts[i + 1];
+    }
+    r *= 2;
+  }
+  return best > 0 ? best : 0.404;
+}
+function grid(lift, pivot, ring = 0) {
+  const pos = [], idx = [];
+  for (let j = 0; j <= SR.nz; j++) for (let i = 0; i <= SR.nx; i++) {
+    const x = -SR.x + (2 * SR.x) * i / SR.nx;
+    const z = SR.zf + (SR.zr - SR.zf) * j / SR.nz;
+    pos.push(x - pivot[0], roofY(x, z) + lift - pivot[1], z - pivot[2]);
+  }
+  for (let j = 0; j < SR.nz; j++) for (let i = 0; i < SR.nx; i++) {
+    if (ring && i > 0 && i < SR.nx - 1 && j > 0 && j < SR.nz - 1) continue; // frame: outer cells only
+    const a = j * (SR.nx + 1) + i, b = a + 1, c = a + SR.nx + 1, d = c + 1;
+    idx.push(a, c, b, b, c, d);
+  }
+  return { pos, idx };
+}
+function gridNode(name, mat, lift, pivot, ring = 0) {
+  const g = grid(lift, pivot, ring);
+  const prim = doc.createPrimitive().setMaterial(mat)
+    .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array(g.pos)).setBuffer(buffer))
+    .setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint32Array(g.idx)).setBuffer(buffer));
+  // Up-facing normals (roof is nearly flat)
+  prim.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setArray(new Float32Array(g.pos.length).map((_, k) => k % 3 === 1 ? 1 : 0)).setBuffer(buffer));
+  return doc.createNode(name).setMesh(doc.createMesh(name).addPrimitive(prim)).setTranslation(pivot);
+}
+const srPivot = [0, roofY(0, SR.zf), SR.zf];
+carNode.addChild(gridNode('sunroof_frame', holeMat, 0.0006, [0, 0, 0], 1));
+carNode.addChild(gridNode('sunroof', sunroofGlassMat, 0.0016, srPivot));
+console.log('sunroof pivot', srPivot);
 console.log('triangles per part:', counts);
 
+material.setNormalTexture(null);
 await doc.transform(
   weld(),
   simplify({ simplifier: MeshoptSimplifier, ratio: RATIO, error: 0.0008, lockBorder: true }),

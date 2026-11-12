@@ -101,6 +101,8 @@ private class RealCarController(
     // Animated values (smoothed towards target each frame)
     private val doors = FloatArray(4)
     private val windows = FloatArray(4)
+    private var sunOpen = 0f
+    private var sunTilt = 0f
     private var trunk = 0f
     private var hood = 0f
     private var steer = 0f
@@ -115,8 +117,8 @@ private class RealCarController(
         engine = Engine.create()
         val uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK).apply { isOpaque = false }
         manipulator = Manipulator.Builder()
-            .targetPosition(0f, -0.1f, -4f)
-            .orbitHomePosition(2.9f, 0.9f, -1.0f)   // front three-quarter, driver (left) side
+            .targetPosition(0f, -0.05f, -4f)
+            .orbitHomePosition(3.3f, 1.0f, -0.6f)   // front three-quarter, driver (left) side
             .zoomSpeed(0.05f)
             .orbitSpeed(0.006f, 0.006f)
             .viewport(1, 1)
@@ -135,8 +137,20 @@ private class RealCarController(
         val bytes = context.assets.open(MODEL_ASSET).use { it.readBytes() }
         val buffer = ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.nativeOrder()).put(bytes).also { it.rewind() }
         viewer.loadModelGlb(buffer)
-        viewer.transformToUnitCube()
         val asset = viewer.asset ?: throw IllegalStateException("model failed to load")
+        // Frame the car ourselves: gltfio's bounding box ignores node transforms,
+        // so transformToUnitCube() would mis-size a rigged model. The car is
+        // CAR_LENGTH model units long, centred at (0, CAR_CENTER_Y, CAR_CENTER_Z).
+        run {
+            val k = 2f / CAR_LENGTH
+            val tm0 = engine.transformManager
+            tm0.setTransform(
+                tm0.getInstance(asset.root),
+                floatArrayOf(k, 0f, 0f, 0f, 0f, k, 0f, 0f, 0f, 0f, k, 0f, 0f, -k * CAR_CENTER_Y, -4f - k * CAR_CENTER_Z, 1f)
+            )
+        }
+        // Slightly darker exposure than ModelViewer's default: keeps the paint from blowing out.
+        viewer.camera.setExposure(16f, 1f / 125f, 80f)
 
         val tm = engine.transformManager
         for (name in RIG_NAMES) {
@@ -152,7 +166,8 @@ private class RealCarController(
                 "door_fl", "glass_fl" -> Part.DOOR_FL; "door_fr", "glass_fr" -> Part.DOOR_FR
                 "door_rl", "glass_rl" -> Part.DOOR_RL; "door_rr", "glass_rr" -> Part.DOOR_RR
                 "trunk", "trunk_glass" -> Part.TRUNK; "hood", "hood_glass" -> Part.HOOD
-                "body_glass" -> Part.ROOF
+                "body_glass", "roof", "roof_cutout" -> Part.ROOF
+                "sunroof", "sunroof_frame" -> Part.SUNROOF
                 else -> Part.BODY
             }
         }
@@ -226,6 +241,8 @@ private class RealCarController(
         val w = s.windows.open
         for (i in 0..3) windows[i] += (w.getOrElse(i) { 0f } - windows[i]) * min(1f, dt * 2.5f)
         trunk += (b(d.trunk) - trunk) * k
+        sunOpen += (s.windows.sunroofOpen - sunOpen) * min(1f, dt * 1.5f)
+        sunTilt += (b(s.windows.sunroofTilt) - sunTilt) * min(1f, dt * 2.5f)
         hood += (b(d.hood) - hood) * k
         val steerGoal = Math.toRadians(((s.steeringDeg ?: 0f) / 15f).coerceIn(-35f, 35f).toDouble()).toFloat()
         steer += (steerGoal - steer) * min(1f, dt * 8f)
@@ -248,6 +265,11 @@ private class RealCarController(
         for (w in arrayOf("wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr")) pose(w, Mat.rotX(spin))
         // Window glass slides straight down into its door (model units; the root is scaled to metres).
         GLASS.forEachIndexed { i, g -> pose(g, Mat.translateY(-WINDOW_DROP * windows[i])) }
+        // Spoiler-type sunroof: pops up at the back, then slides rearwards over the roof.
+        val pop = min(1f, sunOpen * 4f)
+        pose("sunroof", Mat.mul(Mat.translate(0f, 0.012f * pop, -0.17f * sunOpen), Mat.rotX(0.12f * sunTilt + 0.04f * pop)))
+        // The roof skin under the glass is hidden while open so the cabin shows through.
+        pose("roof_cutout", Mat.scale(if (sunOpen > 0.02f) 0f else 1f))
     }
 
     private fun pose(name: String, local: FloatArray) {
@@ -269,10 +291,13 @@ private class RealCarController(
     companion object {
         private const val TAG = "RealCarView"
         const val MODEL_ASSET = "models/shine.glb"
+        private const val CAR_LENGTH = 1.175f
+        private const val CAR_CENTER_Y = 0.20f
+        private const val CAR_CENTER_Z = -0.009f
         private val RIG_NAMES = listOf(
             "door_fl", "door_fr", "door_rl", "door_rr", "trunk", "hood",
             "steer_fl", "steer_fr", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr",
-            "glass_fl", "glass_fr", "glass_rl", "glass_rr"
+            "glass_fl", "glass_fr", "glass_rl", "glass_rr", "sunroof", "roof_cutout"
         )
         private val GLASS = arrayOf("glass_fl", "glass_fr", "glass_rl", "glass_rr")
         private const val WINDOW_DROP = 0.12f
@@ -290,7 +315,9 @@ private object Mat {
         }
         return out
     }
-    fun translateY(t: Float) = floatArrayOf(1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, t, 0f, 1f)
+    fun translateY(t: Float) = translate(0f, t, 0f)
+    fun translate(x: Float, y: Float, z: Float) = floatArrayOf(1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, x, y, z, 1f)
+    fun scale(s: Float) = floatArrayOf(s, 0f, 0f, 0f, 0f, s, 0f, 0f, 0f, 0f, s, 0f, 0f, 0f, 0f, 1f)
     fun rotY(a: Float): FloatArray {
         val c = cos(a); val s = sin(a)
         return floatArrayOf(c, 0f, -s, 0f, 0f, 1f, 0f, 0f, s, 0f, c, 0f, 0f, 0f, 0f, 1f)
@@ -341,7 +368,7 @@ private object StudioEnvironment {
         // prefiltered reflections cubemap itself.
         return IndirectLight.Builder()
             .reflections(tex)
-            .intensity(32_000f)
+            .intensity(24_000f)
             .build(engine)
     }
 
@@ -359,6 +386,11 @@ private object StudioEnvironment {
         return floatArrayOf(d[0] / l, d[1] / l, d[2] / l)
     }
 
+    private fun smooth(e0: Float, e1: Float, x: Float): Float {
+        val t = ((x - e0) / (e1 - e0)).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
+    }
+
     private fun radiance(d: FloatArray): FloatArray {
         val y = d[1]
         // Base: dark teal floor/walls, lighter towards the ceiling.
@@ -366,13 +398,14 @@ private object StudioEnvironment {
         var r = 0.03f + 0.10f * t
         var g = 0.06f + 0.16f * t
         var b = 0.07f + 0.18f * t
-        // Big overhead softbox
-        if (y > 0.82f) { r += 3.2f; g += 3.3f; b += 3.4f }
-        // Two long side strips (give the long highlight along the body side)
+        // Big overhead softbox with a soft edge
+        val top = smooth(0.55f, 0.95f, y)
+        r += 2.2f * top; g += 2.3f * top; b += 2.4f * top
+        // Two broad side panels (long, soft highlight along the body side)
         val az = kotlin.math.atan2(d[0], d[2])
-        if (y in 0.15f..0.45f && (kotlin.math.abs(az - 1.2f) < 0.35f || kotlin.math.abs(az + 1.9f) < 0.3f)) {
-            r += 1.6f; g += 1.7f; b += 1.8f
-        }
+        val band = smooth(0.0f, 0.25f, y) * (1f - smooth(0.45f, 0.7f, y))
+        val side = max(1f - kotlin.math.abs(az - 1.2f) / 0.7f, 1f - kotlin.math.abs(az + 1.9f) / 0.6f).coerceAtLeast(0f)
+        r += 1.1f * band * side; g += 1.2f * band * side; b += 1.25f * band * side
         // Horizon glow
         val hz = max(0f, 1f - kotlin.math.abs(y) * 6f)
         r += 0.25f * hz; g += 0.35f * hz; b += 0.38f * hz

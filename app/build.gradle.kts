@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("app.cash.paparazzi")
 }
 
 android {
@@ -84,4 +85,6 @@ dependencies {
     implementation("com.google.android.filament:filament-utils-android:1.51.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    testImplementation("junit:junit:4.13.2")
 }
