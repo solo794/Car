@@ -54,6 +54,11 @@ class Prefs(context: Context) {
         const val KEY_HVAC_ASSUMED_FAN = "hvac_assumed_fan"
         const val KEY_HVAC_ASSUMED_AUTO = "hvac_assumed_auto"
         const val KEY_HVAC_ASSUMED_POWER = "hvac_assumed_power"
+
+        const val KEY_DASHBOARD_ENABLED = "dashboard_enabled"
+        const val KEY_VEHICLE_MODE = "vehicle_data_mode"
+        const val KEY_VEHICLE_DEFAULT_CODES = "vehicle_allow_default_codes"
+        const val KEY_TPMS_UNIT = "tpms_unit"
     }
 
     private fun putList(key: String, values: List<String>) {
@@ -235,4 +240,24 @@ class Prefs(context: Context) {
     var musicWidgetDuringGps: Boolean
         get() = sp.getBoolean(KEY_MUSIC_WIDGET_DURING_GPS, true)
         set(value) = sp.edit().putBoolean(KEY_MUSIC_WIDGET_DURING_GPS, value).apply()
+
+    /** Show the car dashboard as the first home page. */
+    var dashboardEnabled: Boolean
+        get() = sp.getBoolean(KEY_DASHBOARD_ENABLED, true)
+        set(value) = sp.edit().putBoolean(KEY_DASHBOARD_ENABLED, value).apply()
+
+    /** "auto" (read the real car) | "demo" | "off" - see VehicleRepository. */
+    var vehicleDataMode: String
+        get() = sp.getString(KEY_VEHICLE_MODE, "auto") ?: "auto"
+        set(value) = sp.edit().putString(KEY_VEHICLE_MODE, value).apply()
+
+    /** Use community-documented AIDL codes when the vendor ones can't be read. Off by default (unverified). */
+    var vehicleAllowDefaultCodes: Boolean
+        get() = sp.getBoolean(KEY_VEHICLE_DEFAULT_CODES, false)
+        set(value) = sp.edit().putBoolean(KEY_VEHICLE_DEFAULT_CODES, value).apply()
+
+    /** "bar" | "kpa" | "psi" */
+    var tpmsUnit: String
+        get() = sp.getString(KEY_TPMS_UNIT, "bar") ?: "bar"
+        set(value) = sp.edit().putString(KEY_TPMS_UNIT, value).apply()
 }

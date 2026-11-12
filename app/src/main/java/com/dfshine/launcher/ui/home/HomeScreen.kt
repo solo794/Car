@@ -41,6 +41,7 @@ import com.dfshine.launcher.data.LauncherViewModel
 import com.dfshine.launcher.model.AppInfo
 import com.dfshine.launcher.service.NotificationBadgeService
 import com.dfshine.launcher.ui.components.AppIconTile
+import com.dfshine.launcher.ui.dashboard.DashboardPage
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,6 +60,7 @@ fun HomeScreen(
     onOpenDrawer: () -> Unit,
     onOpenQuickPanel: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenVehicleDiagnostics: () -> Unit,
     onLaunch: (AppInfo) -> Unit,
     onRequestUnlock: (AppInfo, onUnlocked: () -> Unit) -> Unit
 ) {
@@ -67,8 +69,11 @@ fun HomeScreen(
     val badgeCounts by NotificationBadgeService.badgeCountsFlow.collectAsState()
     val columns = prefs.gridColumns.coerceIn(3, 6)
     val perPage = columns * 5 // 5 rows per page suits a tall screen
-    val pageCount = maxOf(1, ceil(apps.size / perPage.toDouble()).toInt())
+    val appPageCount = maxOf(1, ceil(apps.size / perPage.toDouble()).toInt())
+    val dashboardPages = if (prefs.dashboardEnabled) 1 else 0
+    val pageCount = appPageCount + dashboardPages
     val pagerState = rememberPagerState(pageCount = { pageCount })
+    val onDashboard = dashboardPages == 1 && pagerState.currentPage == 0
 
     Column(
         modifier = Modifier
@@ -80,37 +85,50 @@ fun HomeScreen(
                 }
             }
     ) {
-        StatusStrip(
-            modifier = Modifier.fillMaxWidth().statusBarsPadding(),
-            onOpenQuickPanel = onOpenQuickPanel,
-            onOpenSettings = onOpenSettings
-        )
+        // The dashboard page has its own clock + settings button.
+        if (!onDashboard) {
+            StatusStrip(
+                modifier = Modifier.fillMaxWidth().statusBarsPadding(),
+                onOpenQuickPanel = onOpenQuickPanel,
+                onOpenSettings = onOpenSettings
+            )
+        }
 
         Box(modifier = Modifier.weight(1f)) {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize()
-            ) { page ->
-                val pageApps = apps.drop(page * perPage).take(perPage)
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(columns),
-                    contentPadding = PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(pageApps, key = { it.key }) { app ->
-                        val isLocked = app.key in prefs.lockedApps
-                        AppIconTile(
-                            app = app,
-                            showLabel = prefs.showIconLabels,
-                            badgeCount = if (prefs.notificationBadgesEnabled) badgeCounts[app.packageName] ?: 0 else 0,
-                            isLocked = isLocked,
-                            onClick = {
-                                if (isLocked) onRequestUnlock(app) { onLaunch(app) } else onLaunch(app)
-                            },
-                            onLongPress = { /* full app management lives in the App Drawer */ }
-                        )
+            ) { pagerPage ->
+                if (dashboardPages == 1 && pagerPage == 0) {
+                    DashboardPage(
+                        tpmsUnit = prefs.tpmsUnit,
+                        onOpenDiagnostics = onOpenVehicleDiagnostics,
+                        onOpenSettings = onOpenSettings,
+                        modifier = Modifier.statusBarsPadding()
+                    )
+                } else {
+                    val page = pagerPage - dashboardPages
+                    val pageApps = apps.drop(page * perPage).take(perPage)
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(columns),
+                        contentPadding = PaddingValues(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(pageApps, key = { it.key }) { app ->
+                            val isLocked = app.key in prefs.lockedApps
+                            AppIconTile(
+                                app = app,
+                                showLabel = prefs.showIconLabels,
+                                badgeCount = if (prefs.notificationBadgesEnabled) badgeCounts[app.packageName] ?: 0 else 0,
+                                isLocked = isLocked,
+                                onClick = {
+                                    if (isLocked) onRequestUnlock(app) { onLaunch(app) } else onLaunch(app)
+                                },
+                                onLongPress = { /* full app management lives in the App Drawer */ }
+                            )
+                        }
                     }
                 }
             }

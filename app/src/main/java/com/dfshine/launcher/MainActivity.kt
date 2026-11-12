@@ -25,6 +25,7 @@ import com.dfshine.launcher.data.LauncherViewModel
 import com.dfshine.launcher.model.AppInfo
 import com.dfshine.launcher.service.PersistentNavBarService
 import com.dfshine.launcher.ui.components.PinUnlockDialog
+import com.dfshine.launcher.ui.dashboard.VehicleDiagnosticsScreen
 import com.dfshine.launcher.ui.drawer.AppDrawerScreen
 import com.dfshine.launcher.ui.home.HomeScreen
 import com.dfshine.launcher.ui.quickpanel.QuickPanel
@@ -36,6 +37,7 @@ import com.dfshine.launcher.ui.tools.FileManagerScreen
 import com.dfshine.launcher.ui.tools.MusicPlayerScreen
 import com.dfshine.launcher.ui.tools.VideoPlayerScreen
 import com.dfshine.launcher.util.PermissionUtils
+import com.dfshine.launcher.vehicle.VehicleRepository
 
 class MainActivity : ComponentActivity() {
 
@@ -48,6 +50,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestRuntimePermissions()
+        startVehicleData()
 
         setContent {
             // Read settingsVersion so the whole tree recomposes whenever a
@@ -76,6 +79,13 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         viewModel.reloadApps()
         ensureNavBarRunning()
+        startVehicleData()
+    }
+
+    /** No-op if already running with the same settings. */
+    private fun startVehicleData() {
+        val prefs = viewModel.prefs
+        VehicleRepository.start(applicationContext, prefs.vehicleDataMode, prefs.vehicleAllowDefaultCodes)
     }
 
     private fun requestRuntimePermissions() {
@@ -129,6 +139,7 @@ private fun LauncherHost(viewModel: LauncherViewModel) {
                 onOpenDrawer = { navController.navigate("drawer") },
                 onOpenQuickPanel = { showQuickPanel = true },
                 onOpenSettings = { navController.navigate("settings") },
+                onOpenVehicleDiagnostics = { navController.navigate("vehiclediag") },
                 onLaunch = ::launchApp,
                 onRequestUnlock = { app, onUnlocked -> pendingUnlock = app to onUnlocked }
             )
@@ -149,11 +160,15 @@ private fun LauncherHost(viewModel: LauncherViewModel) {
                 viewModel = viewModel,
                 onBack = { navController.popBackStack() },
                 onOpenSplitScreen = { navController.navigate("splitscreen") },
+                onOpenVehicleDiagnostics = { navController.navigate("vehiclediag") },
                 onOpenFileManager = { navController.navigate("filemanager") },
                 onOpenBrowser = { navController.navigate("browser") },
                 onOpenMusicPlayer = { navController.navigate("musicplayer") },
                 onOpenVideoPlayer = { navController.navigate("videoplayer") }
             )
+        }
+        composable("vehiclediag") {
+            VehicleDiagnosticsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
         composable("splitscreen") {
             SplitScreenScreen(viewModel = viewModel, onBack = { navController.popBackStack() })

@@ -54,6 +54,7 @@ fun SettingsScreen(
     viewModel: LauncherViewModel,
     onBack: () -> Unit,
     onOpenSplitScreen: () -> Unit,
+    onOpenVehicleDiagnostics: () -> Unit,
     onOpenFileManager: () -> Unit,
     onOpenBrowser: () -> Unit,
     onOpenMusicPlayer: () -> Unit,
@@ -77,6 +78,29 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.padding(top = 12.dp, start = 8.dp)
                 )
+            }
+        }
+
+        item { SectionTitle("لوحة العربية (Dashboard)") }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    SettingsSwitchRow("إظهار لوحة العربية كأول صفحة", prefs.dashboardEnabled) {
+                        prefs.dashboardEnabled = it
+                        viewModel.notifySettingsChanged()
+                    }
+                    Text("وحدة ضغط الكاوتش", modifier = Modifier.padding(top = 8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        listOf("bar" to "bar", "kpa" to "kPa", "psi" to "psi").forEach { (value, label) ->
+                            if (prefs.tpmsUnit == value) {
+                                Button(onClick = {}) { Text(label) }
+                            } else {
+                                OutlinedButton(onClick = { prefs.tpmsUnit = value; viewModel.notifySettingsChanged() }) { Text(label) }
+                            }
+                        }
+                    }
+                    BuiltInToolRow("مصدر البيانات والتشخيص (CAN)", onOpenVehicleDiagnostics, null)
+                }
             }
         }
 
