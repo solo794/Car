@@ -50,7 +50,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Thermostat
-import androidx.compose.material.icons.filled.ThreeSixty
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.Window
@@ -534,7 +534,7 @@ private val QUICK_SLOTS = listOf(
     QuickSlot("media", "ميديا", Icons.Filled.MusicNote),
     QuickSlot("maps", "خرائط", Icons.Filled.Map),
     QuickSlot("camera", "كاميرا", Icons.Filled.CameraAlt),
-    QuickSlot("camera360", "360°", Icons.Filled.ThreeSixty)
+    QuickSlot("camera360", "360°", Icons.Filled.Videocam)
 )
 
 @Composable

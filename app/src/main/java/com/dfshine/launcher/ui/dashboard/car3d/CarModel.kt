@@ -56,7 +56,9 @@ data class CarPose(
     val reverse: Boolean = false,
     val leftSignal: Boolean = false,
     val rightSignal: Boolean = false,
-    val bodyColor: Color = Color(0xFF6F8BA8)
+    val bodyColor: Color = Color(0xFF8E969E),
+    /** Black roof + pillars like the Shine's two-tone trims. */
+    val blackRoof: Boolean = true
 )
 
 /**
@@ -76,33 +78,39 @@ object CarModel {
     private const val FRONT_DOOR_Z = 0.95f
     private const val B_PILLAR_Z = -0.15f
     private const val REAR_DOOR_END_Z = -0.95f
-    private const val TRUNK_HINGE_Z = -1.25f
+    private const val TRUNK_HINGE_Z = -1.55f
 
     private val GLASS = Color(0xFF1B2733)
     private val INTERIOR = Color(0xFF0A0D10)
     private val TIRE = Color(0xFF15171A)
     private val TIRE_HI = Color(0xFF24272B)
-    private val RIM = Color(0xFFB9C2CA)
-    private val RIM_DARK = Color(0xFF2A2F35)
+    private val RIM = Color(0xFF4A5057)       // dark gunmetal like the Shine's wheels
+    private val RIM_DARK = Color(0xFF0E1013)
     private val TRIM = Color(0xFF101418)
+    private val GLOSS_BLACK = Color(0xFF16191D)
+    private val CHROME = Color(0xFF9AA3AB)
+    private val GOLD = Color(0xFFD4A21C)
+    private val CALIPER = Color(0xFFC0262B)
     private val AMBER = Color(0xFFFFB020)
     private val RED = Color(0xFFFF2D2D)
     private val WHITE = Color(0xFFF2FAFF)
 
     private val stations = floatArrayOf(
         2.30f, 2.22f, 2.05f, 1.80f, 1.62f, 1.38f, 1.14f, FRONT_DOOR_Z, 0.60f, 0.25f, B_PILLAR_Z,
-        -0.55f, REAR_DOOR_END_Z, -1.14f, TRUNK_HINGE_Z, -1.38f, -1.62f, -1.80f, -2.05f, -2.22f, -2.30f
+        -0.55f, REAR_DOOR_END_Z, -1.14f, -1.38f, TRUNK_HINGE_Z, -1.80f, -2.05f, -2.22f, -2.30f
     )
 
     /** Greenhouse: z, roof height, roof half width, base half width. */
+    /** Fastback greenhouse: long raked rear glass running down to a short deck. */
     private val green = arrayOf(
         floatArrayOf(0.95f, 0.99f, 0.78f, 0.86f),
-        floatArrayOf(0.60f, 1.22f, 0.71f, 0.86f),
-        floatArrayOf(0.25f, 1.40f, 0.66f, 0.86f),
-        floatArrayOf(-0.15f, 1.44f, 0.66f, 0.86f),
-        floatArrayOf(-0.55f, 1.43f, 0.66f, 0.86f),
-        floatArrayOf(-0.95f, 1.30f, 0.68f, 0.86f),
-        floatArrayOf(-1.25f, 1.02f, 0.76f, 0.84f)
+        floatArrayOf(0.60f, 1.21f, 0.70f, 0.86f),
+        floatArrayOf(0.25f, 1.38f, 0.65f, 0.86f),
+        floatArrayOf(-0.15f, 1.42f, 0.64f, 0.86f),
+        floatArrayOf(-0.55f, 1.37f, 0.64f, 0.86f),
+        floatArrayOf(-0.95f, 1.25f, 0.66f, 0.86f),
+        floatArrayOf(-1.30f, 1.10f, 0.71f, 0.85f),
+        floatArrayOf(-1.55f, 1.035f, 0.76f, 0.83f)
     )
 
     private fun halfWidth(z: Float): Float {
@@ -112,7 +120,7 @@ object CarModel {
 
     private fun top(z: Float): Float = when {
         z >= FRONT_DOOR_Z -> BELT - 0.25f * ((z - FRONT_DOOR_Z) / (HALF_LEN - FRONT_DOOR_Z)).pow(1.5f)
-        z <= TRUNK_HINGE_Z -> 1.02f - 0.07f * ((TRUNK_HINGE_Z - z) / (HALF_LEN + TRUNK_HINGE_Z)).pow(2)
+        z <= TRUNK_HINGE_Z -> 1.03f - 0.05f * ((TRUNK_HINGE_Z - z) / (HALF_LEN + TRUNK_HINGE_Z)).pow(2)
         else -> BELT
     }
 
@@ -173,7 +181,7 @@ object CarModel {
                 val color = when {
                     underside -> TRIM
                     topFace && zMid in TRUNK_HINGE_Z..FRONT_DOOR_Z -> INTERIOR // floor under the cabin, seen through open windows
-                    j == 0 || j == 8 -> body.darker(0.35f)                     // rocker
+                    j == 0 || j == 8 -> TRIM                                    // black side skirts
                     else -> body
                 }
                 faces += Face(transformPart(quad, part, p), color, part)
@@ -197,12 +205,8 @@ object CarModel {
         // Front and rear caps (bumpers)
         faces += Face(rings.first(), body.darker(0.15f), Part.BODY)
         faces += Face(rings.last(), body.darker(0.15f), Part.BODY)
-        // Grille
-        faces += Face(
-            listOf(V3(-0.42f, 0.42f, HALF_LEN + 0.004f), V3(-0.5f, 0.60f, HALF_LEN + 0.004f),
-                V3(0.5f, 0.60f, HALF_LEN + 0.004f), V3(0.42f, 0.42f, HALF_LEN + 0.004f)),
-            TRIM, Part.BODY, bias = 0.02f
-        )
+        frontFascia(faces)
+        rearFascia(faces)
 
         // ---------------- Greenhouse ----------------
         for (i in 0 until green.size - 1) {
@@ -214,21 +218,24 @@ object CarModel {
             val r0b = V3(g0[3], BELT, z0); val r0t = V3(g0[2], g0[1], z0)
             val r1b = V3(g1[3], BELT, z1); val r1t = V3(g1[2], g1[1], z1)
 
-            // Roof / windshield / rear glass
-            val roofColor = if (i <= 1 || i >= 4) GLASS else body
-            val roofPart = if (i in 2..3) Part.ROOF else Part.BODY
-            faces += Face(listOf(l0t, r0t, r1t, l1t), roofColor, roofPart)
+            // Windshield / (black) roof / long rear glass
+            val zm = (z0 + z1) / 2f
+            val isRoof = zm in -0.55f..0.25f
+            val roofColor = if (!isRoof) GLASS else if (p.blackRoof) GLOSS_BLACK else body
+            faces += Face(listOf(l0t, r0t, r1t, l1t), roofColor, if (isRoof) Part.ROOF else Part.BODY)
 
             // Sides
             for (left in listOf(true, false)) {
                 val q = if (left) listOf(l0b, l0t, l1t, l1b) else listOf(r0b, r0t, r1t, r1b)
-                val windowIdx = when (i) {
-                    1, 2 -> if (left) 0 else 1
-                    3, 4 -> if (left) 2 else 3
+                val zm = (z0 + z1) / 2f
+                val windowIdx = when {
+                    zm in B_PILLAR_Z..0.60f -> if (left) 0 else 1
+                    zm in REAR_DOOR_END_Z..B_PILLAR_Z -> if (left) 2 else 3
                     else -> -1
                 }
                 if (windowIdx < 0) {
-                    faces += Face(q, TRIM, Part.BODY) // A / C pillars
+                    // A pillar is glass-black; the C pillar is body coloured with a black kick like the Shine.
+                    faces += Face(q, if (zm > 0.6f || p.blackRoof) GLOSS_BLACK else body, Part.BODY)
                     continue
                 }
                 val part = when (windowIdx) { 0 -> Part.DOOR_FL; 1 -> Part.DOOR_FR; 2 -> Part.DOOR_RL; else -> Part.DOOR_RR }
@@ -252,6 +259,7 @@ object CarModel {
             )
         }
 
+        spoiler(p, faces)
         sunroof(p, faces)
         mirrors(p, faces)
         wheels(p, faces)
@@ -266,7 +274,7 @@ object CarModel {
         Part.DOOR_FR -> pts.map { swingDoor(it, HW, FRONT_DOOR_Z, p.doors[1], left = false) }
         Part.DOOR_RL -> pts.map { swingDoor(it, -HW, B_PILLAR_Z, p.doors[2], left = true) }
         Part.DOOR_RR -> pts.map { swingDoor(it, HW, B_PILLAR_Z, p.doors[3], left = false) }
-        Part.TRUNK -> pts.map { lift(it, TRUNK_HINGE_Z, 1.02f, p.trunk * 1.2f, rearHinge = true) }
+        Part.TRUNK -> pts.map { lift(it, TRUNK_HINGE_Z, 1.03f, p.trunk * 1.2f, rearHinge = true) }
         Part.HOOD -> pts.map { lift(it, FRONT_DOOR_Z, BELT, p.hood * 0.9f, rearHinge = false) }
         else -> pts
     }
@@ -291,9 +299,64 @@ object CarModel {
         return V3(v.x, hy + dy * c - dz * s, hz + dy * s + dz * c)
     }
 
+    /** Big black trapezoid grille with chrome slats, black corner intakes and the gold lip. */
+    private fun frontFascia(out: MutableList<Face>) {
+        val z = HALF_LEN + 0.006f
+        out += Face(listOf(V3(-0.38f, 0.34f, z), V3(-0.52f, 0.65f, z), V3(0.52f, 0.65f, z), V3(0.38f, 0.34f, z)), TRIM, Part.BODY, bias = 0.02f)
+        for (k in 0 until 6) {
+            val y = 0.39f + k * 0.045f
+            val half = 0.39f + (y - 0.34f) * 0.42f
+            out += Face(listOf(V3(-half, y, z + 0.002f), V3(half, y, z + 0.002f), V3(half, y + 0.008f, z + 0.002f), V3(-half, y + 0.008f, z + 0.002f)),
+                CHROME, Part.BODY, bias = 0.025f)
+        }
+        for (sx in floatArrayOf(-1f, 1f)) {
+            out += Face(listOf(V3(sx * 0.57f, 0.30f, z), V3(sx * 0.70f, 0.30f, z), V3(sx * 0.72f, 0.60f, z), V3(sx * 0.62f, 0.60f, z)),
+                TRIM, Part.BODY, bias = 0.02f)
+        }
+        out += Face(listOf(V3(-0.66f, 0.255f, z + 0.004f), V3(0.66f, 0.255f, z + 0.004f), V3(0.66f, 0.275f, z + 0.004f), V3(-0.66f, 0.275f, z + 0.004f)),
+            GOLD, Part.BODY, bias = 0.03f)
+    }
+
+    /** Full-width black light bar, black corner blades, diffuser and quad exhaust tips. */
+    private fun rearFascia(out: MutableList<Face>) {
+        val z = -HALF_LEN - 0.006f
+        out += Face(listOf(V3(-0.74f, 0.84f, z), V3(0.74f, 0.84f, z), V3(0.70f, 0.95f, z), V3(-0.70f, 0.95f, z)), GLOSS_BLACK, Part.BODY, bias = 0.015f)
+        for (sx in floatArrayOf(-1f, 1f)) {
+            out += Face(listOf(V3(sx * 0.66f, 0.84f, z), V3(sx * 0.73f, 0.84f, z), V3(sx * 0.70f, 0.40f, z), V3(sx * 0.63f, 0.40f, z)),
+                GLOSS_BLACK, Part.BODY, bias = 0.02f)
+        }
+        out += Face(listOf(V3(-0.70f, 0.25f, z), V3(0.70f, 0.25f, z), V3(0.66f, 0.40f, z), V3(-0.66f, 0.40f, z)), TRIM, Part.BODY, bias = 0.06f)
+        out += Face(listOf(V3(-0.08f, 0.30f, z - 0.002f), V3(0.08f, 0.30f, z - 0.002f), V3(0.08f, 0.33f, z - 0.002f), V3(-0.08f, 0.33f, z - 0.002f)),
+            Color(0xFF8A1C1C), Part.BODY, bias = 0.025f)
+        for (cx in floatArrayOf(-0.56f, -0.44f, 0.44f, 0.56f)) {
+            val n = 10
+            out += Face(List(n) { k -> val a = k * 2f * Math.PI.toFloat() / n; V3(cx + 0.055f * cos(a), 0.31f + 0.045f * sin(a), z - 0.003f) },
+                CHROME, Part.BODY, bias = 0.07f)
+            out += Face(List(n) { k -> val a = k * 2f * Math.PI.toFloat() / n; V3(cx + 0.038f * cos(a), 0.31f + 0.030f * sin(a), z - 0.004f) },
+                Color.Black, Part.BODY, bias = 0.075f)
+        }
+    }
+
+    /** Floating ducktail wing on the trunk lid (moves with it). */
+    private fun spoiler(p: CarPose, out: MutableList<Face>) {
+        val y0 = 1.06f; val y1 = 1.10f
+        val zf = -1.95f; val zr = -2.22f
+        val xw = 0.74f
+        val wing = listOf(
+            listOf(V3(-xw, y1, zf), V3(xw, y1, zf), V3(xw, y1 + 0.03f, zr), V3(-xw, y1 + 0.03f, zr)),
+            listOf(V3(-xw, y0, zr), V3(xw, y0, zr), V3(xw, y1 + 0.03f, zr), V3(-xw, y1 + 0.03f, zr)),
+            listOf(V3(-xw, y0, zf), V3(xw, y0, zf), V3(xw, y1, zf), V3(-xw, y1, zf))
+        )
+        for (q in wing) out += Face(transformPart(q, Part.TRUNK, p), GLOSS_BLACK, Part.TRUNK, bias = 0.01f)
+        for (sx in floatArrayOf(-0.45f, 0.45f)) {
+            val strut = listOf(V3(sx - 0.02f, 1.0f, -2.05f), V3(sx + 0.02f, 1.0f, -2.05f), V3(sx + 0.02f, y0, -2.12f), V3(sx - 0.02f, y0, -2.12f))
+            out += Face(transformPart(strut, Part.TRUNK, p), GLOSS_BLACK, Part.TRUNK)
+        }
+    }
+
     private fun sunroof(p: CarPose, out: MutableList<Face>) {
-        val y = 1.445f
-        val zf = 0.18f; val zr = -0.48f; val xw = 0.44f
+        val y = 1.425f
+        val zf = 0.15f; val zr = -0.42f; val xw = 0.42f
         val open = p.sunroofOpen.coerceIn(0f, 1f)
         if (open > 0.02f) {
             out += Face(listOf(V3(-xw, y, zf), V3(xw, y, zf), V3(xw, y, zr), V3(-xw, y, zr)), INTERIOR, Part.SUNROOF, bias = 0.01f)
@@ -354,11 +417,17 @@ object CarModel {
                 // Sidewall, rim, spokes (outer face)
                 out += Face(List(n) { local(outer, WHEEL_R, it * 2f * Math.PI.toFloat() / n) }, TIRE, Part.WHEEL, bias = 0.005f)
                 out += Face(List(n) { local(outer * 1.04f, 0.245f, it * 2f * Math.PI.toFloat() / n) }, RIM, Part.WHEEL, bias = 0.01f)
-                for (s in 0 until 5) {
-                    val a = p.wheelSpin + s * (2f * Math.PI.toFloat() / 5) + 0.63f
+                // Red brake caliper (fixed, doesn't spin) peeking between the spokes
+                out += Face(
+                    List(6) { k -> local(outer * 0.9f, if (k < 3) 0.20f else 0.13f, (if (k < 3) k else 5 - k) * 0.35f + 0.25f) },
+                    CALIPER, Part.WHEEL, bias = 0.008f
+                )
+                // 10 dark windows between twin spokes
+                for (s in 0 until 10) {
+                    val a = p.wheelSpin + s * (2f * Math.PI.toFloat() / 10)
                     out += Face(
-                        listOf(local(outer * 1.05f, 0.07f, a - 0.32f), local(outer * 1.05f, 0.21f, a - 0.42f),
-                            local(outer * 1.05f, 0.21f, a + 0.42f), local(outer * 1.05f, 0.07f, a + 0.32f)),
+                        listOf(local(outer * 1.05f, 0.08f, a - 0.13f), local(outer * 1.05f, 0.225f, a - 0.22f),
+                            local(outer * 1.05f, 0.225f, a + 0.22f), local(outer * 1.05f, 0.08f, a + 0.13f)),
                         RIM_DARK, Part.WHEEL, bias = 0.015f
                     )
                 }
@@ -380,21 +449,20 @@ object CarModel {
         }
         for (sx in floatArrayOf(-1f, 1f)) {
             // Headlight strip
-            out += quadX(sx * 0.46f, sx * 0.84f, 0.68f, 0.75f, fz, headColor, headOn || p.position, front, if (headOn) 0.55f else 0.25f)
+            out += quadX(sx * 0.40f, sx * 0.73f, 0.68f, 0.74f, fz, headColor, headOn || p.position, front, if (headOn) 0.55f else 0.25f)
             // Front turn signal
             val sig = if (sx < 0) p.leftSignal else p.rightSignal
-            out += quadX(sx * 0.70f, sx * 0.84f, 0.62f, 0.67f, fz, if (sig) AMBER else Color(0xFF5A4A2A), sig, front, 0.4f)
+            out += quadX(sx * 0.62f, sx * 0.73f, 0.63f, 0.67f, fz, if (sig) AMBER else Color(0xFF5A4A2A), sig, front, 0.4f)
             // Fog
-            out += quadX(sx * 0.58f, sx * 0.76f, 0.30f, 0.35f, fz, if (p.fogFront) Color(0xFFFFE58A) else Color(0xFF3A3F45), p.fogFront, front, 0.35f)
+            out += quadX(sx * 0.59f, sx * 0.67f, 0.33f, 0.37f, fz, if (p.fogFront) Color(0xFFFFE58A) else Color(0xFF3A3F45), p.fogFront, front, 0.35f)
             // Tail light corner + rear signal
             val tailOn = p.position || headOn || p.brake
-            out += quadX(sx * 0.50f, sx * 0.86f, 0.86f, 0.93f, rz, if (p.brake) RED else if (tailOn) RED.copy(alpha = 0.7f) else Color(0xFF5A1E1E), tailOn, back, if (p.brake) 0.5f else 0.25f)
-            out += quadX(sx * 0.70f, sx * 0.86f, 0.80f, 0.85f, rz, if (sig) AMBER else Color(0xFF4A3A20), sig, back, 0.4f)
+            out += quadX(sx * 0.44f, sx * 0.73f, 0.86f, 0.93f, rz, if (p.brake) RED else if (tailOn) RED.copy(alpha = 0.7f) else Color(0xFF5A1E1E), tailOn, back, if (p.brake) 0.5f else 0.25f)
+            out += quadX(sx * 0.60f, sx * 0.72f, 0.79f, 0.83f, rz, if (sig) AMBER else Color(0xFF4A3A20), sig, back, 0.4f)
         }
         // Light bars across front (DRL accent) and rear
         out += quadX(-0.46f, 0.46f, 0.735f, 0.75f, fz, if (headOn || p.position) WHITE else Color(0xFF6F7C88), headOn || p.position, front, 0f)
         out += quadX(-0.50f, 0.50f, 0.89f, 0.905f, rz, if (p.position || headOn || p.brake) RED else Color(0xFF5A1E1E), p.position || headOn || p.brake, back, 0f)
-        out += quadX(-0.60f, 0.60f, 0.25f, 0.27f, fz, if (p.position) AMBER.copy(alpha = 0.9f) else Color(0xFF3A3F45), p.position, front, 0f)
         if (p.reverse) out += quadX(-0.12f, 0.12f, 0.80f, 0.86f, rz, WHITE, true, back, 0.5f)
         if (p.fogRear) out += quadX(-0.40f, -0.25f, 0.34f, 0.38f, rz, RED, true, back, 0.3f)
     }
