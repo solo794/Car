@@ -18,8 +18,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # ubuntu-latest already ships an Android SDK (ANDROID_HOME is set).
+      # android-actions/setup-android@v3 now fails trying to install the
+      # removed "tools" package, so it is not used.
+      - name: Show Android SDK
+        run: echo "ANDROID_HOME=$ANDROID_HOME" && ls "$ANDROID_HOME/platforms" || true
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
