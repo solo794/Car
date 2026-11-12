@@ -101,7 +101,21 @@ fun SettingsScreen(
                             }
                         }
                     }
-                    Text("لون مجسم العربية", modifier = Modifier.padding(top = 8.dp))
+                    Text("شكل مجسم العربية", modifier = Modifier.padding(top = 8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        listOf("real" to "واقعي (3D حقيقي)", "simple" to "مبسّط (أخف)").forEach { (value, label) ->
+                            if (prefs.carModelStyle == value) {
+                                Button(onClick = {}) { Text(label) }
+                            } else {
+                                OutlinedButton(onClick = { prefs.carModelStyle = value; viewModel.notifySettingsChanged() }) { Text(label) }
+                            }
+                        }
+                    }
+                    Text(
+                        "المجسم الواقعي: \"Aeolus Yixuan\" من تصميم teenlin3 على Sketchfab، برخصة CC BY 4.0. اتعدّل (اتقسّم أجزاء واتخفف) عشان يشتغل هنا.",
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    Text("لون المجسم المبسّط", modifier = Modifier.padding(top = 8.dp))
                     Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         CAR_COLORS.forEach { hex ->
                             val c = Color(android.graphics.Color.parseColor(hex))

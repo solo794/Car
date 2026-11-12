@@ -1,0 +1,7 @@
+3D model: "Aeolus Yixuan" by teenlin3
+Source:   https://sketchfab.com/3d-models/aeolus-yixuan-3b164088d4114ae787ff5c1504d75837
+License:  Creative Commons Attribution 4.0 (CC BY 4.0) - http://creativecommons.org/licenses/by/4.0/
+
+Changes made for Shine Launcher: split into separately pivoted parts (doors,
+trunk, hood, wheels, calipers), geometry simplified (~1.5M -> ~250k triangles),
+textures resized and re-encoded as JPEG. Script: tools/car-model/split.mjs

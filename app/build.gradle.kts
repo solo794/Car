@@ -16,6 +16,14 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
+
+        // Filament ships native libs per ABI; head units are ARM (often 32-bit userspace).
+        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
+    }
+
+    androidResources {
+        // Keep the 3D model uncompressed in the APK (it is already compact binary data).
+        noCompress += "glb"
     }
 
     buildTypes {
@@ -69,6 +77,11 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.7.7")
+
+    // Google Filament: PBR renderer + glTF loader for the real 3D car model.
+    implementation("com.google.android.filament:filament-android:1.51.0")
+    implementation("com.google.android.filament:gltfio-android:1.51.0")
+    implementation("com.google.android.filament:filament-utils-android:1.51.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

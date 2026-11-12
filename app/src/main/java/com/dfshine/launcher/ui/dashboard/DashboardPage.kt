@@ -87,6 +87,7 @@ import com.dfshine.launcher.service.NotificationBadgeService
 import com.dfshine.launcher.ui.components.AppPickerDialog
 import com.dfshine.launcher.ui.dashboard.car3d.Car3DView
 import com.dfshine.launcher.ui.dashboard.car3d.Part
+import com.dfshine.launcher.ui.dashboard.car3d.RealCarView
 import com.dfshine.launcher.vehicle.VehicleRepository
 import com.dfshine.launcher.vehicle.VehicleRepository.Control
 import com.dfshine.launcher.vehicle.VehicleState
@@ -125,6 +126,7 @@ fun DashboardPage(
     val context = LocalContext.current
     var showSunroof by remember { mutableStateOf(false) }
     var confirmTrunk by remember { mutableStateOf(false) }
+    var realModelFailed by remember { mutableStateOf(false) }
     val carColor = remember(viewModel.settingsVersion) {
         runCatching { Color(android.graphics.Color.parseColor(prefs.carColorHex)) }.getOrDefault(Color(0xFF6F8BA8))
     }
@@ -178,7 +180,11 @@ fun DashboardPage(
                     onTrunk = { confirmTrunk = true }
                 )
                 Box(Modifier.weight(1f).fillMaxHeight()) {
-                    Car3DView(state, carColor, ::onPart, Modifier.fillMaxSize())
+                    if (prefs.carModelStyle == "real" && !realModelFailed) {
+                        RealCarView(state, ::onPart, onFailure = { realModelFailed = true }, modifier = Modifier.fillMaxSize())
+                    } else {
+                        Car3DView(state, carColor, ::onPart, Modifier.fillMaxSize())
+                    }
                     TpmsCorners(state.tpms, prefs.tpmsUnit)
                     Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally) {
                         DoorWarning(state.doors)

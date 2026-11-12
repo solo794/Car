@@ -63,6 +63,7 @@ class Prefs(context: Context) {
         const val KEY_CONTROLS_WHILE_MOVING = "vehicle_controls_while_moving"
         const val KEY_CAR_COLOR = "car_model_color"
         const val KEY_QUICK_APP_PREFIX = "quick_app_"
+        const val KEY_CAR_MODEL_STYLE = "car_model_style"
     }
 
     private fun putList(key: String, values: List<String>) {
@@ -290,4 +291,9 @@ class Prefs(context: Context) {
     fun setQuickApp(slot: String, key: String?) {
         sp.edit().putString(KEY_QUICK_APP_PREFIX + slot, key).apply()
     }
+
+    /** "real" = the photo-real glTF model (Filament), "simple" = the lightweight drawn model. */
+    var carModelStyle: String
+        get() = sp.getString(KEY_CAR_MODEL_STYLE, "real") ?: "real"
+        set(value) = sp.edit().putString(KEY_CAR_MODEL_STYLE, value).apply()
 }
