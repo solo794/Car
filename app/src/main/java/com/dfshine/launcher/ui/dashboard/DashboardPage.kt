@@ -314,7 +314,7 @@ private fun TopBar(s: VehicleState, canWrite: Boolean, accent: Color, onDiag: ()
     if (fixedNow == null) LaunchedEffect(Unit) { while (true) { now = Date(); delay(1000) } }
     val time = remember { SimpleDateFormat("hh:mm", Locale.US) }
     val ampm = remember { SimpleDateFormat("a", Locale.US) }
-    val date = remember { SimpleDateFormat("EEEE، d MMMM", Locale("ar")) }
+    val date = remember { SimpleDateFormat("EEEE، d MMMM", Locale.forLanguageTag("ar-EG-u-nu-latn")) }
     val (label, color) = when (s.source) {
         VehicleState.Source.LIVE -> (if (canWrite) "CAN · تحكم" else "CAN · مباشر") to Dash.Ok
         VehicleState.Source.DEMO -> "عرض تجريبي" to Dash.Warn
@@ -391,11 +391,13 @@ private fun fuelColor(pct: Float?, accent: Color) = when {
 @Composable
 private fun MiniStat(icon: ImageVector, value: String, unit: String, label: String, tint: Color) {
     Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(value, style = Dash.Value)
-            Text(unit, style = Dash.UnitText, modifier = Modifier.padding(start = 2.dp))
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(value, style = Dash.Value)
+                Text(unit, style = Dash.UnitText, modifier = Modifier.padding(start = 2.dp))
+            }
         }
         Text(label, style = Dash.Caption)
     }
@@ -564,7 +566,7 @@ private fun TpmsButton(t: VehicleState.Tpms?, active: Boolean, onClick: () -> Un
         else -> Dash.Ok
     }
     Row(
-        modifier.glass(radius = 18.dp, tint = if (active) c else null).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
+        modifier.solidGlass(radius = 18.dp, tint = if (active) c else null).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(7.dp).clip(CircleShape).background(c))
@@ -595,10 +597,12 @@ private fun TireChip(t: VehicleState.Tpms, i: Int, name: String, unit: String, m
     }
     val unitLabel = when (unit) { "kpa" -> "kPa"; "psi" -> "psi"; else -> "bar" }
     val c = if (warn) Dash.Danger else Dash.Ok
-    Column(modifier.glass(radius = 14.dp, tint = if (warn) Dash.Danger else null).padding(horizontal = 12.dp, vertical = 6.dp)) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, style = Dash.ValueSmall.copy(color = c))
-            Text(" $unitLabel", style = Dash.UnitText)
+    Column(modifier.solidGlass(tint = if (warn) Dash.Danger else null).padding(horizontal = 12.dp, vertical = 6.dp)) {
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(value, style = Dash.ValueSmall.copy(color = c))
+                Text(" $unitLabel", style = Dash.UnitText)
+            }
         }
         Text("$name · ${t.tempC.getOrElse(i) { 0f }.toInt()}°", style = Dash.Caption)
     }
@@ -616,7 +620,7 @@ private fun DoorWarning(d: VehicleState.Doors) {
             if (d.hood) add("الكبوت")
         }
         Row(
-            Modifier.padding(bottom = 8.dp).glass(radius = 16.dp, tint = Dash.Warn).padding(horizontal = 14.dp, vertical = 6.dp),
+            Modifier.padding(bottom = 8.dp).solidGlass(radius = 16.dp, tint = Dash.Warn).padding(horizontal = 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(Icons.Filled.Warning, null, tint = Dash.Warn, modifier = Modifier.size(16.dp))
@@ -641,7 +645,7 @@ private fun NoticePill(notice: Notice?, onShown: () -> Unit, modifier: Modifier)
         val n = shown ?: return@AnimatedVisibility
         val c = if (n.ok) Dash.Ok else Dash.Warn
         Row(
-            Modifier.glass(radius = 18.dp, strong = true, tint = c).padding(horizontal = 16.dp, vertical = 8.dp),
+            Modifier.solidGlass(radius = 18.dp, tint = c).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(c))

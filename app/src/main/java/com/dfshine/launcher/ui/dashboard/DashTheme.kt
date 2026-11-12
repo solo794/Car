@@ -62,6 +62,16 @@ object Dash {
     val Background = Brush.verticalGradient(0f to BgTop, 0.55f to BgMid, 1f to BgBottom)
 }
 
+/** Opaque-ish dark glass for labels floating over the 3D car (must stay legible). */
+fun Modifier.solidGlass(radius: Dp = 14.dp, tint: Color? = null): Modifier {
+    val shape = RoundedCornerShape(radius)
+    return this
+        .clip(shape)
+        .background(Color(0xE60B1117))
+        .background((tint ?: Color.Transparent).copy(alpha = if (tint != null) 0.14f else 0f))
+        .border(1.dp, (tint ?: Color.White).copy(alpha = if (tint != null) 0.55f else 0.14f), shape)
+}
+
 /** Frosted glass card. */
 fun Modifier.glass(radius: Dp = Dash.CardRadius, strong: Boolean = false, tint: Color? = null): Modifier {
     val shape = RoundedCornerShape(radius)

@@ -83,7 +83,7 @@ class DashboardSnapshotTest {
                         onMedia = {}, onOpenDiagnostics = {}, onOpenSettings = {},
                         car = { m ->
                             Box(m, contentAlignment = Alignment.Center) {
-                                Image(car, null, Modifier.fillMaxWidth().padding(start = 70.dp, end = 4.dp), contentScale = ContentScale.FillWidth)
+                                Image(car, null, Modifier.fillMaxWidth().padding(horizontal = 96.dp), contentScale = ContentScale.FillWidth)
                             }
                         },
                         modifier = Modifier.weight(1f),
