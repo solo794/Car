@@ -5,11 +5,15 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import com.dfshine.launcher.service.ReverseCameraReceiver
+import com.dfshine.launcher.ui.dashboard.car3d.CrashGuard
+import com.dfshine.launcher.util.CrashLog
 
 class LauncherApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashLog.install(this)
+        CrashGuard.checkOnLaunch(this)
         createNotificationChannels()
 
         // Android 8+ only auto-delivers a handful of "protected" implicit

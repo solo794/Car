@@ -93,6 +93,7 @@ import com.dfshine.launcher.model.AppInfo
 import com.dfshine.launcher.service.NotificationBadgeService
 import com.dfshine.launcher.ui.components.AppPickerDialog
 import com.dfshine.launcher.ui.dashboard.car3d.Car3DView
+import com.dfshine.launcher.ui.dashboard.car3d.CrashGuard
 import com.dfshine.launcher.ui.dashboard.car3d.Part
 import com.dfshine.launcher.ui.dashboard.car3d.RealCarView
 import com.dfshine.launcher.vehicle.VehicleRepository
@@ -124,7 +125,7 @@ fun DashboardPage(
 
     var showSunroof by remember { mutableStateOf(false) }
     var confirmTrunk by remember { mutableStateOf(false) }
-    var realModelFailed by remember { mutableStateOf(false) }
+    var realModelFailed by remember { mutableStateOf(CrashGuard.realModelBlocked(context)) }
     var picking by remember { mutableStateOf<QuickSlot?>(null) }
     var notice by remember { mutableStateOf<Notice?>(null) }
     val carColor = remember(version) {

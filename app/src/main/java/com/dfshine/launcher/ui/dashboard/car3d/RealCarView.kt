@@ -93,10 +93,12 @@ private class RealCarController(
     private val engine: Engine
     private val viewer: ModelViewer
     private val manipulator: Manipulator
+    private val uiHelper: UiHelper
     private val choreographer = Choreographer.getInstance()
     private var destroyed = false
     private var lastFrameNs = 0L
     private var lastRenderNs = 0L
+    private var renderedFrames = 0
 
     // Animated values (smoothed towards target each frame)
     private val doors = FloatArray(4)
@@ -113,9 +115,10 @@ private class RealCarController(
     private val partByEntity = HashMap<Int, Part>()
 
     init {
+        CrashGuard.realModelStarting(context)
         Utils.init()
         engine = Engine.create()
-        val uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK).apply { isOpaque = false }
+        uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK).apply { isOpaque = false }
         manipulator = Manipulator.Builder()
             .targetPosition(0f, -0.05f, -4f)
             .orbitHomePosition(3.3f, 1.0f, -0.6f)   // front three-quarter, driver (left) side
@@ -201,8 +204,9 @@ private class RealCarController(
             }
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 val h = textureView.height
+                if (destroyed) return true
                 viewer.view.pick(e.x.toInt(), h - e.y.toInt(), Handler(Looper.getMainLooper())) { result ->
-                    partByEntity[result.renderable]?.let(onPartTap)
+                    if (!destroyed) partByEntity[result.renderable]?.let(onPartTap)
                 }
                 return true
             }
@@ -217,6 +221,7 @@ private class RealCarController(
     override fun doFrame(frameTimeNanos: Long) {
         if (destroyed) return
         choreographer.postFrameCallback(this)
+        if (!uiHelper.isReadyToRender) return
         val dt = if (lastFrameNs == 0L) 0f else ((frameTimeNanos - lastFrameNs) / 1e9f).coerceAtMost(0.1f)
         lastFrameNs = frameTimeNanos
         animate(dt)
@@ -225,6 +230,7 @@ private class RealCarController(
         lastRenderNs = frameTimeNanos
         try {
             viewer.render(frameTimeNanos)
+            if (++renderedFrames == 300) CrashGuard.realModelStable(textureView.context)
         } catch (t: Throwable) {
             Log.e(TAG, "render failed", t)
             destroyed = true
@@ -280,12 +286,22 @@ private class RealCarController(
 
     private fun b(v: Boolean) = if (v) 1f else 0f
 
+    /**
+     * Tear-down order matters: detach the UiHelper first (it destroys the
+     * swap chain while the engine is still alive). Destroying the engine
+     * first left the TextureView calling back into a dead engine when the
+     * page was swiped away - a native crash that killed the whole launcher.
+     */
     fun destroy() {
         if (destroyed) return
         destroyed = true
         choreographer.removeFrameCallback(this)
-        runCatching { viewer.destroyModel() }
-        runCatching { engine.destroy() }
+        textureView.setOnTouchListener(null)
+        runCatching { uiHelper.detach() }.onFailure { Log.w(TAG, "detach", it) }
+        runCatching { viewer.destroyModel() }.onFailure { Log.w(TAG, "destroyModel", it) }
+        runCatching { engine.flushAndWait() }
+        runCatching { engine.destroy() }.onFailure { Log.w(TAG, "engine.destroy", it) }
+        CrashGuard.realModelStopped(textureView.context)
     }
 
     companion object {

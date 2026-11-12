@@ -179,10 +179,13 @@ const glassMat = doc.createMaterial('glass')
   .setRoughnessFactor(0.04)
   .setAlphaMode('BLEND')
   .setDoubleSided(true);
-const roofMat = doc.createMaterial('roof_black')
-  .setBaseColorFactor([0.010, 0.011, 0.013, 1])
-  .setMetallicFactor(0.0)
-  .setRoughnessFactor(0.14);
+// Single-tone car: the roof is body paint. Colour = the door-panel paint in the
+// texture (sRGB 0.459, 0.557, 0.710) converted to linear for glTF.
+const srgbToLinear = c => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+const roofMat = doc.createMaterial('roof_paint')
+  .setBaseColorFactor([srgbToLinear(0.459), srgbToLinear(0.557), srgbToLinear(0.710), 1])
+  .setMetallicFactor(0.35)
+  .setRoughnessFactor(0.32);
 const sunroofGlassMat = doc.createMaterial('sunroof_glass')
   .setBaseColorFactor([0.006, 0.010, 0.014, 0.88])
   .setMetallicFactor(0.0)

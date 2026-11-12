@@ -170,6 +170,18 @@ fun VehicleDiagnosticsScreen(viewModel: LauncherViewModel, onBack: () -> Unit) {
             }
         }
 
+        item {
+            val crash = remember { com.dfshine.launcher.util.CrashLog.read(context) }
+            if (crash != null) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("آخر كراش للتطبيق", style = MaterialTheme.typography.titleMedium, color = Color(0xFFFF6B6B))
+                        Mono(crash.take(3000))
+                        OutlinedButton(onClick = { com.dfshine.launcher.util.CrashLog.clear(context) }) { Text("مسح") }
+                    }
+                }
+            }
+        }
         item { Text("السجل الخام (آخر ${log.size})", style = MaterialTheme.typography.titleMedium) }
         items(log.asReversed()) { e -> Mono(e.format()) }
     }
@@ -216,6 +228,7 @@ private fun exportReport(
         appendLine("resolver=${VendorCodeResolver.resolve(context)}")
         appendLine("\n# services"); services.forEach { appendLine(it) }
         appendLine("\n# packages"); packages.forEach { appendLine(it) }
+        appendLine("\n# last crash"); appendLine(com.dfshine.launcher.util.CrashLog.read(context) ?: "(none)")
         appendLine("\n# raw log"); appendLine(RawLog.dump())
     }
     val dirs = listOfNotNull(

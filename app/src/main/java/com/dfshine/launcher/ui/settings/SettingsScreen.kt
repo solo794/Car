@@ -118,7 +118,11 @@ fun SettingsScreen(
                             if (prefs.carModelStyle == value) {
                                 Button(onClick = {}) { Text(label) }
                             } else {
-                                OutlinedButton(onClick = { prefs.carModelStyle = value; viewModel.notifySettingsChanged() }) { Text(label) }
+                                OutlinedButton(onClick = {
+                                    prefs.carModelStyle = value
+                                    if (value == "real") com.dfshine.launcher.ui.dashboard.car3d.CrashGuard.reset(context)
+                                    viewModel.notifySettingsChanged()
+                                }) { Text(label) }
                             }
                         }
                     }
