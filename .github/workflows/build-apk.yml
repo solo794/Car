@@ -5,6 +5,9 @@ on:
     branches: ["**"]
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -36,3 +39,20 @@ jobs:
           name: shine-launcher-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      # Also publish the APK as a release asset: unlike workflow artifacts,
+      # release files have a direct download link (no GitHub sign-in needed
+      # on a public repo), which is easier to open from a phone.
+      - name: Copy APK with a stable name
+        run: cp app/build/outputs/apk/debug/app-debug.apk shine-launcher.apk
+
+      - name: Publish to the "latest-apk" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-apk
+          name: Shine Launcher (latest build)
+          prerelease: true
+          body: |
+            آخر نسخة اتبنت تلقائياً من الفرع ${{ github.ref_name }}
+            commit: ${{ github.sha }}
+          files: shine-launcher.apk
