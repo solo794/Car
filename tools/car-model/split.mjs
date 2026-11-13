@@ -26,6 +26,36 @@ function texRGB(u, v) {
   return [px[i] / 255, px[i + 1] / 255, px[i + 2] / 255];
 }
 
+// ---------- repaint the body (owner's car is grey; source model is blue) ----------
+// Pixels with the paint's blue hue are mapped to the target grey at the same
+// relative luminance, so the artist's baked shading/reflections survive.
+const PAINT_SRGB = [0.50, 0.53, 0.56];              // Shine "grey" from the owner's photos
+const PAINT_REF_LUM = 0.546;                         // luminance of the source blue paint
+{
+  let changed = 0;
+  for (let i = 0; i < px.length; i += pinfo.channels) {
+    const r = px[i] / 255, g = px[i + 1] / 255, b = px[i + 2] / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    if (mx < 0.12 || mx - mn < 0.07) continue;            // dark / already grey
+    let h;
+    if (mx === b) h = 60 * ((r - g) / (mx - mn)) + 240;
+    else if (mx === g) h = 60 * ((b - r) / (mx - mn)) + 120;
+    else continue;                                        // red-dominant: not the paint
+    if (h < 195 || h > 235) continue;                     // only the body's blue
+    const sat = (mx - mn) / mx;
+    if (sat < 0.12) continue;
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const k = lum / PAINT_REF_LUM;
+    px[i] = Math.min(255, Math.round(PAINT_SRGB[0] * k * 255));
+    px[i + 1] = Math.min(255, Math.round(PAINT_SRGB[1] * k * 255));
+    px[i + 2] = Math.min(255, Math.round(PAINT_SRGB[2] * k * 255));
+    changed++;
+  }
+  const png = await sharp(px, { raw: { width: pinfo.width, height: pinfo.height, channels: pinfo.channels } }).png().toBuffer();
+  baseTex.setImage(new Uint8Array(png)).setMimeType('image/png');
+  console.log('repainted pixels:', changed);
+}
+
 // ---------- geometry landmarks (model units; car is 1.175 long, +z front, +x = car's left) ----------
 const WHEELS = { fl: [1, 0.315], fr: [-1, 0.315], rl: [1, -0.321], rr: [-1, -0.321] };
 const WY = 0.080, WR = 0.086;
@@ -183,7 +213,7 @@ const glassMat = doc.createMaterial('glass')
 // texture (sRGB 0.459, 0.557, 0.710) converted to linear for glTF.
 const srgbToLinear = c => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
 const roofMat = doc.createMaterial('roof_paint')
-  .setBaseColorFactor([srgbToLinear(0.459), srgbToLinear(0.557), srgbToLinear(0.710), 1])
+  .setBaseColorFactor([srgbToLinear(PAINT_SRGB[0] * 0.98), srgbToLinear(PAINT_SRGB[1] * 0.98), srgbToLinear(PAINT_SRGB[2] * 0.98), 1])
   .setMetallicFactor(0.35)
   .setRoughnessFactor(0.32);
 const sunroofGlassMat = doc.createMaterial('sunroof_glass')
