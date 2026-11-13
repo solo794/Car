@@ -67,7 +67,10 @@ class FloatingPipService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        startForeground(NOTIFICATION_ID, buildForegroundNotification())
+        if (runCatching { startForeground(NOTIFICATION_ID, buildForegroundNotification()) }.isFailure) {
+            stopSelf()
+            return
+        }
         startGpsWatcher()
     }
 
@@ -80,7 +83,7 @@ class FloatingPipService : Service() {
             ACTION_STOP -> stopSelf()
             else -> Unit
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -164,8 +167,7 @@ class FloatingPipService : Service() {
         }
 
         makeDraggable(content, params) { removeAllViews() }
-        panelView = content
-        windowManager.addView(content, params)
+        if (safeAdd(content, params)) panelView = content
     }
 
     private fun collapseToBubble() {
@@ -186,8 +188,20 @@ class FloatingPipService : Service() {
         }
 
         makeDraggable(bubble, params) { showPanel(if (mode == Mode.NONE) Mode.MUSIC else mode) }
-        bubbleView = bubble
-        windowManager.addView(bubble, params)
+        if (safeAdd(bubble, params)) bubbleView = bubble
+    }
+
+    /** Adds an overlay window; if the system refuses it, stop instead of crashing the launcher. */
+    private fun safeAdd(view: android.view.View, params: WindowManager.LayoutParams): Boolean {
+        if (!PermissionUtils.canDrawOverlays(this)) { stopSelf(); return false }
+        return try {
+            windowManager.addView(view, params)
+            true
+        } catch (t: Throwable) {
+            android.util.Log.w("FloatingPip", "overlay refused", t)
+            stopSelf()
+            false
+        }
     }
 
     private fun removeAllViews() {

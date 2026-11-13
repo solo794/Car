@@ -55,13 +55,18 @@ class PersistentNavBarService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        startForeground(NOTIFICATION_ID, buildNotification())
+        val started = runCatching { startForeground(NOTIFICATION_ID, buildNotification()) }.isSuccess
+        if (!started || !com.dfshine.launcher.util.PermissionUtils.canDrawOverlays(this)) {
+            stopSelf()
+            return
+        }
         showBar()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) stopSelf()
-        return START_STICKY
+        // Not sticky: if the overlay can't be shown, don't let the system restart us into a crash loop.
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -102,8 +107,16 @@ class PersistentNavBarService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.BOTTOM }
 
-        barView = bar
-        windowManager.addView(bar, params)
+        // Some ROMs (seen on HONOR, Android 17) report the overlay permission as
+        // granted and still refuse the window: never let that crash the launcher.
+        try {
+            windowManager.addView(bar, params)
+            barView = bar
+        } catch (t: Throwable) {
+            android.util.Log.w("PersistentNavBar", "overlay refused", t)
+            barView = null
+            stopSelf()
+        }
     }
 
     private fun weightedParams() =

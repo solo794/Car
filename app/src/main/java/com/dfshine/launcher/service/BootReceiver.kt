@@ -51,10 +51,14 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     private fun startForegroundServiceCompat(context: Context, intent: Intent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(context, intent)
-        } else {
-            context.startService(intent)
+        // Starting a foreground service can be refused (background limits, missing
+        // permissions on some ROMs); a refused start must never crash the app.
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(context, intent)
+            } else {
+                context.startService(intent)
+            }
         }
     }
 }

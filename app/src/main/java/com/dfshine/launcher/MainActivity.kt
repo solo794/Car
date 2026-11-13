@@ -110,10 +110,12 @@ class MainActivity : ComponentActivity() {
     private fun ensureNavBarRunning() {
         val prefs = viewModel.prefs
         if (prefs.navBarEnabled && PermissionUtils.canDrawOverlays(this)) {
-            androidx.core.content.ContextCompat.startForegroundService(
-                this,
-                PersistentNavBarService.startIntent(this)
-            )
+            runCatching {
+                androidx.core.content.ContextCompat.startForegroundService(
+                    this,
+                    PersistentNavBarService.startIntent(this)
+                )
+            }
         }
     }
 }

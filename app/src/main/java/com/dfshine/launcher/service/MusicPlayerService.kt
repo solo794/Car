@@ -197,7 +197,7 @@ class MusicPlayerService : Service() {
                 running.playQueueInternal(tracks, startIndex)
             } else {
                 pendingQueue = tracks to startIndex
-                ContextCompat.startForegroundService(context, Intent(context, MusicPlayerService::class.java))
+                runCatching { ContextCompat.startForegroundService(context, Intent(context, MusicPlayerService::class.java)) }
             }
         }
 

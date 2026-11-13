@@ -138,7 +138,7 @@ fun QuickPanel(
 
 private fun startFloating(context: Context, action: String) {
     if (!PermissionUtils.canDrawOverlays(context)) return
-    ContextCompat.startForegroundService(context, FloatingPipService.intent(context, action))
+    runCatching { ContextCompat.startForegroundService(context, FloatingPipService.intent(context, action)) }
 }
 
 @Composable

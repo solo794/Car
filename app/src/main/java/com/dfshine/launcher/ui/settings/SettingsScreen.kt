@@ -250,7 +250,7 @@ fun SettingsScreen(
                             viewModel.notifySettingsChanged()
                             val serviceIntent = android.content.Intent(context, com.dfshine.launcher.service.MediaKeyService::class.java)
                             if (it) {
-                                androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
+                                runCatching { androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent) }
                             } else {
                                 context.stopService(serviceIntent)
                             }
@@ -351,11 +351,16 @@ fun SettingsScreen(
                         title = "إظهار ودجت التكييف الاحتياطي فوق كل التطبيقات",
                         checked = prefs.navBarEnabled,
                         onCheckedChange = {
+                            val serviceIntent = com.dfshine.launcher.service.PersistentNavBarService.startIntent(context)
+                            if (it && !com.dfshine.launcher.util.PermissionUtils.canDrawOverlays(context)) {
+                                // Ask for "display over other apps" first instead of starting a service that can't draw.
+                                runCatching { context.startActivity(com.dfshine.launcher.util.PermissionUtils.overlayPermissionIntent(context)) }
+                                return@SettingsSwitchRow
+                            }
                             prefs.navBarEnabled = it
                             viewModel.notifySettingsChanged()
-                            val serviceIntent = com.dfshine.launcher.service.PersistentNavBarService.startIntent(context)
                             if (it) {
-                                androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
+                                runCatching { androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent) }
                             } else {
                                 context.stopService(serviceIntent)
                             }
