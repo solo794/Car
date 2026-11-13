@@ -11,6 +11,9 @@ import android.view.MotionEvent
 import android.view.TextureView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import android.view.ViewGroup
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,39 +59,62 @@ fun RealCarView(
     onFailure: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val tap by rememberUpdatedState(onPartTap)
     val fail by rememberUpdatedState(onFailure)
-    var controller by remember { mutableStateOf<RealCarController?>(null) }
-
+    val controller = remember { RealCarHost.obtain(context) }
+    if (controller == null) {
+        LaunchedEffect(Unit) { fail() }
+        return
+    }
+    DisposableEffect(controller) {
+        controller.onPartTap = { tap(it) }
+        controller.onFailure = { fail() }
+        onDispose {
+            controller.onPartTap = {}
+            controller.onFailure = {}
+        }
+    }
     AndroidView(
         modifier = modifier,
-        factory = { ctx ->
-            TextureView(ctx).also { tv ->
-                controller = try {
-                    RealCarController(ctx, tv, { tap(it) }, { fail() })
-                } catch (t: Throwable) {
-                    Log.e("RealCarView", "Filament init failed", t)
-                    Handler(Looper.getMainLooper()).post { fail() }
-                    null
-                }
-            }
-        },
-        update = { controller?.target = state }
+        // The same TextureView (and engine) is reused for the whole process:
+        // leaving the page only removes it from the hierarchy. Destroying /
+        // re-binding Filament on every navigation crashed natively.
+        factory = { controller.textureView.also { (it.parent as? ViewGroup)?.removeView(it) } },
+        update = { controller.target = state }
     )
-    DisposableEffect(Unit) {
-        onDispose { controller?.destroy() }
+}
+
+/** Process-wide holder: one Filament engine + model + TextureView for the app's lifetime. */
+private object RealCarHost {
+    private var controller: RealCarController? = null
+    private var failed = false
+
+    fun obtain(context: Context): RealCarController? {
+        if (failed) return null
+        controller?.let { if (!it.broken) return it else { failed = true; return null } }
+        return try {
+            val app = context.applicationContext
+            RealCarController(app, TextureView(app)).also { controller = it }
+        } catch (t: Throwable) {
+            Log.e("RealCarView", "Filament init failed", t)
+            failed = true
+            null
+        }
     }
 }
 
 /** Owns the Filament engine, the loaded asset and the per-frame part animation. */
 private class RealCarController(
     context: Context,
-    private val textureView: TextureView,
-    private val onPartTap: (Part) -> Unit,
-    private val onFailure: () -> Unit
+    val textureView: TextureView
 ) : Choreographer.FrameCallback {
 
     @Volatile var target: VehicleState = VehicleState()
+    var onPartTap: (Part) -> Unit = {}
+    var onFailure: () -> Unit = {}
+    private var looping = false
+    val broken: Boolean get() = destroyed
 
     private val engine: Engine
     private val viewer: ModelViewer
@@ -178,7 +204,24 @@ private class RealCarController(
 
         setupLights()
         installGestures()
+        // Only animate/render while the view is on screen.
+        textureView.addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: android.view.View) { startLoop() }
+            override fun onViewDetachedFromWindow(v: android.view.View) { stopLoop() }
+        })
+    }
+
+    private fun startLoop() {
+        if (looping || destroyed) return
+        looping = true
+        lastFrameNs = 0L
         choreographer.postFrameCallback(this)
+    }
+
+    private fun stopLoop() {
+        looping = false
+        choreographer.removeFrameCallback(this)
+        CrashGuard.realModelStopped(textureView.context)   // a clean exit, not a crash
     }
 
     private fun setupLights() {
@@ -219,7 +262,7 @@ private class RealCarController(
     }
 
     override fun doFrame(frameTimeNanos: Long) {
-        if (destroyed) return
+        if (destroyed || !looping) return
         choreographer.postFrameCallback(this)
         if (!uiHelper.isReadyToRender) return
         val dt = if (lastFrameNs == 0L) 0f else ((frameTimeNanos - lastFrameNs) / 1e9f).coerceAtMost(0.1f)
