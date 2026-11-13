@@ -31,7 +31,17 @@ import com.google.android.filament.Texture
 import com.google.android.filament.View
 import com.google.android.filament.android.UiHelper
 import com.google.android.filament.utils.Manipulator
-import com.google.android.filament.utils.ModelViewer
+import android.view.Surface
+import com.google.android.filament.Camera
+import com.google.android.filament.Scene
+import com.google.android.filament.SwapChain
+import com.google.android.filament.Viewport
+import com.google.android.filament.android.DisplayHelper
+import com.google.android.filament.gltfio.AssetLoader
+import com.google.android.filament.gltfio.FilamentAsset
+import com.google.android.filament.gltfio.ResourceLoader
+import com.google.android.filament.gltfio.UbershaderProvider
+import com.google.android.filament.utils.GestureDetector as FilamentGestureDetector
 import com.google.android.filament.utils.Utils
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -117,9 +127,24 @@ private class RealCarController(
     val broken: Boolean get() = destroyed
 
     private val engine: Engine
-    private val viewer: ModelViewer
+    // Our own minimal viewer on top of Filament + gltfio. (ModelViewer was
+    // dropped: it destroys the whole engine by itself when its TextureView
+    // detaches from the window, so returning to the page used dead objects.)
+    private val renderer: Renderer
+    private val scene: Scene
+    private val view: View
+    private val camera: Camera
+    private val assetLoader: AssetLoader
+    private val resourceLoader: ResourceLoader
+    private val asset: FilamentAsset
     private val manipulator: Manipulator
     private val uiHelper: UiHelper
+    private val displayHelper: DisplayHelper
+    private val orbitGestures: FilamentGestureDetector
+    private var swapChain: SwapChain? = null
+    private val eye = DoubleArray(3)
+    private val lookTarget = DoubleArray(3)
+    private val up = DoubleArray(3)
     private val choreographer = Choreographer.getInstance()
     private var destroyed = false
     private var lastFrameNs = 0L
@@ -145,7 +170,6 @@ private class RealCarController(
         CrashGuard.realModelStarting(context)
         Utils.init()
         engine = Engine.create()
-        uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK).apply { isOpaque = false }
         manipulator = Manipulator.Builder()
             .targetPosition(0f, -0.05f, -4f)
             .orbitHomePosition(3.3f, 1.0f, -0.6f)   // front three-quarter, driver (left) side
@@ -153,21 +177,61 @@ private class RealCarController(
             .orbitSpeed(0.006f, 0.006f)
             .viewport(1, 1)
             .build(Manipulator.Mode.ORBIT)
-        viewer = ModelViewer(textureView, engine, uiHelper, manipulator)
-        textureView.isOpaque = false
 
-        viewer.view.blendMode = View.BlendMode.TRANSLUCENT
-        viewer.renderer.clearOptions = Renderer.ClearOptions().apply {
+        renderer = engine.createRenderer()
+        renderer.clearOptions = Renderer.ClearOptions().apply {
             clear = true
             clearColor = floatArrayOf(0f, 0f, 0f, 0f)
         }
-        viewer.view.dynamicResolutionOptions = viewer.view.dynamicResolutionOptions.apply { enabled = false }
-        viewer.view.antiAliasing = View.AntiAliasing.FXAA
+        scene = engine.createScene()
+        camera = engine.createCamera(EntityManager.get().create())
+        // Slightly darker than the usual f/16 1/125 ISO100: keeps the paint from blowing out.
+        camera.setExposure(16f, 1f / 125f, 80f)
+        view = engine.createView().apply {
+            this.scene = this@RealCarController.scene
+            this.camera = this@RealCarController.camera
+            blendMode = View.BlendMode.TRANSLUCENT
+            antiAliasing = View.AntiAliasing.FXAA
+            dynamicResolutionOptions = dynamicResolutionOptions.apply { enabled = false }
+        }
 
+        assetLoader = AssetLoader(engine, UbershaderProvider(engine), EntityManager.get())
+        resourceLoader = ResourceLoader(engine)
         val bytes = context.assets.open(MODEL_ASSET).use { it.readBytes() }
         val buffer = ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.nativeOrder()).put(bytes).also { it.rewind() }
-        viewer.loadModelGlb(buffer)
-        val asset = viewer.asset ?: throw IllegalStateException("model failed to load")
+        asset = assetLoader.createAsset(buffer) ?: throw IllegalStateException("model failed to load")
+        resourceLoader.loadResources(asset)
+        asset.releaseSourceData()
+        scene.addEntities(asset.entities)
+
+        // Surface handling: we own the swap chain for the TextureView's lifetime.
+        displayHelper = DisplayHelper(context)
+        uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK).apply {
+            isOpaque = false
+            renderCallback = object : UiHelper.RendererCallback {
+                override fun onNativeWindowChanged(surface: Surface) {
+                    swapChain?.let { engine.destroySwapChain(it) }
+                    swapChain = engine.createSwapChain(surface, swapChainFlags)
+                    textureView.display?.let { displayHelper.attach(renderer, it) }
+                }
+                override fun onDetachedFromSurface() {
+                    displayHelper.detach()
+                    swapChain?.let {
+                        engine.destroySwapChain(it)
+                        engine.flushAndWait()
+                        swapChain = null
+                    }
+                }
+                override fun onResized(width: Int, height: Int) {
+                    view.viewport = Viewport(0, 0, width, height)
+                    camera.setLensProjection(28.0, width.toDouble() / height.coerceAtLeast(1), 0.05, 100.0)
+                    manipulator.setViewport(width, height)
+                }
+            }
+            attachTo(textureView)
+        }
+        textureView.isOpaque = false
+        orbitGestures = FilamentGestureDetector(textureView, manipulator)
         // Frame the car ourselves: gltfio's bounding box ignores node transforms,
         // so transformToUnitCube() would mis-size a rigged model. The car is
         // CAR_LENGTH model units long, centred at (0, CAR_CENTER_Y, CAR_CENTER_Z).
@@ -179,8 +243,6 @@ private class RealCarController(
                 floatArrayOf(k, 0f, 0f, 0f, 0f, k, 0f, 0f, 0f, 0f, k, 0f, 0f, -k * CAR_CENTER_Y, -4f - k * CAR_CENTER_Z, 1f)
             )
         }
-        // Slightly darker exposure than ModelViewer's default: keeps the paint from blowing out.
-        viewer.camera.setExposure(16f, 1f / 125f, 80f)
 
         val tm = engine.transformManager
         for (name in RIG_NAMES) {
@@ -226,9 +288,17 @@ private class RealCarController(
     }
 
     private fun setupLights() {
-        val scene = viewer.scene
         scene.indirectLight = StudioEnvironment.create(engine)
-        // Key light (ModelViewer already adds one sun; add a cool rim light from behind).
+        // Warm key light from above-front...
+        val sun = EntityManager.get().create()
+        LightManager.Builder(LightManager.Type.SUN)
+            .color(0.98f, 0.95f, 0.91f)
+            .intensity(100_000f)
+            .direction(0.3f, -1f, -0.4f)
+            .castShadows(false)
+            .build(engine, sun)
+        scene.addEntity(sun)
+        // ...and a cool rim light from behind.
         val rim = EntityManager.get().create()
         LightManager.Builder(LightManager.Type.DIRECTIONAL)
             .color(0.80f, 0.90f, 1.0f)
@@ -249,7 +319,7 @@ private class RealCarController(
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 val h = textureView.height
                 if (destroyed) return true
-                viewer.view.pick(e.x.toInt(), h - e.y.toInt(), Handler(Looper.getMainLooper())) { result ->
+                view.pick(e.x.toInt(), h - e.y.toInt(), Handler(Looper.getMainLooper())) { result ->
                     if (!destroyed) partByEntity[result.renderable]?.let(onPartTap)
                 }
                 return true
@@ -257,7 +327,7 @@ private class RealCarController(
         })
         textureView.setOnTouchListener { _, event ->
             detector.onTouchEvent(event)
-            viewer.onTouchEvent(event)
+            orbitGestures.onTouchEvent(event)
             true
         }
     }
@@ -273,7 +343,13 @@ private class RealCarController(
         if (frameTimeNanos - lastRenderNs < 30_000_000L) return
         lastRenderNs = frameTimeNanos
         try {
-            viewer.render(frameTimeNanos)
+            val sc = swapChain ?: return
+            manipulator.getLookAt(eye, lookTarget, up)
+            camera.lookAt(eye[0], eye[1], eye[2], lookTarget[0], lookTarget[1], lookTarget[2], up[0], up[1], up[2])
+            if (renderer.beginFrame(sc, frameTimeNanos)) {
+                renderer.render(view)
+                renderer.endFrame()
+            }
             if (++renderedFrames == 300) CrashGuard.realModelStable(textureView.context)
         } catch (t: Throwable) {
             Log.e(TAG, "render failed", t)
@@ -355,17 +431,24 @@ private class RealCarController(
      * first left the TextureView calling back into a dead engine when the
      * page was swiped away - a native crash that killed the whole launcher.
      */
+    /** Not called during normal use (the host keeps one instance for the app's lifetime). */
     fun destroy() {
         if (destroyed) return
         destroyed = true
-        choreographer.removeFrameCallback(this)
-        textureView.setOnTouchListener(null)
-        runCatching { uiHelper.detach() }.onFailure { Log.w(TAG, "detach", it) }
-        runCatching { viewer.destroyModel() }.onFailure { Log.w(TAG, "destroyModel", it) }
-        runCatching { engine.flushAndWait() }
-        runCatching { engine.destroy() }.onFailure { Log.w(TAG, "engine.destroy", it) }
-        CrashGuard.realModelStopped(textureView.context)
+        stopLoop()
+        runCatching { uiHelper.detach() }
+        runCatching {
+            resourceLoader.destroy()
+            assetLoader.destroyAsset(asset)
+            assetLoader.destroy()
+            engine.destroyRenderer(renderer)
+            engine.destroyView(view)
+            engine.destroyScene(scene)
+            engine.destroyCameraComponent(camera.entity)
+            engine.destroy()
+        }
     }
+
 
     companion object {
         private const val TAG = "RealCarView"
