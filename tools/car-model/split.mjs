@@ -2,7 +2,7 @@
 // rigged GLB: separate pivoted nodes for 4 doors, trunk, hood, 4 wheels (spin) with
 // calipers on the steer node, simplified geometry and smaller textures.
 import { NodeIO } from '@gltf-transform/core';
-import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import { ALL_EXTENSIONS, KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { simplify, weld, prune, dedup, textureCompress } from '@gltf-transform/functions';
 import { MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
@@ -122,6 +122,7 @@ function part(name) {
   return parts[name] ??= { pos: [], nor: [], uv: [], tan: [], idx: [], map: new Map() };
 }
 const roofPts = [];
+const allWp = [];
 pivots.roof = [0, 0, 0];
 pivots.roof_cutout = [0, 0, 0];
 const meshNodes = [];
@@ -137,6 +138,7 @@ for (const node of meshNodes) {
     const I = prim.getIndices().getArray();
     const vcount = P.length / 3;
     const wp = new Float32Array(P.length), wn = N ? new Float32Array(N.length) : null;
+    allWp.push(wp);
     for (let v = 0; v < vcount; v++) {
       const p = xform(m, P[v * 3], P[v * 3 + 1], P[v * 3 + 2], 1);
       wp.set(p, v * 3);
@@ -295,6 +297,112 @@ const srPivot = [0, roofY(0, SR.zf), SR.zf];
 carNode.addChild(gridNode('sunroof_frame', holeMat, 0.0006, [0, 0, 0], 1));
 carNode.addChild(gridNode('sunroof', sunroofGlassMat, 0.0016, srPivot));
 console.log('sunroof pivot', srPivot);
+
+// ---------- lamps: light-up overlays shaped to the real lamp surfaces ----------
+// Each lamp is a small grid laid over the lamp area seen from the front/rear;
+// every grid vertex takes the depth of the actual body surface there, pushed
+// a hair outwards, so the overlay hugs the lamp. Unlit + translucent; the app
+// switches each node on/off (scale 0/1) from the CAN light state.
+const unlitExt = doc.createExtension(KHRMaterialsUnlit);
+function lampMat(name, rgba) {
+  return doc.createMaterial(name).setBaseColorFactor(rgba).setAlphaMode('BLEND').setDoubleSided(true)
+    .setExtension('KHR_materials_unlit', unlitExt.createUnlit());
+}
+const MAT = {
+  head: lampMat('lamp_head', [1.0, 0.98, 0.92, 0.80]),
+  high: lampMat('lamp_high', [0.80, 0.90, 1.0, 0.95]),
+  tail: lampMat('lamp_tail', [1.0, 0.06, 0.04, 0.70]),
+  brake: lampMat('lamp_brake', [1.0, 0.10, 0.06, 0.95]),
+  amber: lampMat('lamp_amber', [1.0, 0.55, 0.04, 0.95]),
+  white: lampMat('lamp_white', [1.0, 1.0, 1.0, 0.90]),
+  fog: lampMat('lamp_fog', [1.0, 0.93, 0.70, 0.60]),
+  beamLow: lampMat('beam_low', [1.0, 0.97, 0.88, 1.0]),
+  beamHigh: lampMat('beam_high', [0.82, 0.90, 1.0, 1.0]),
+};
+const flat = (() => { let n = 0; allWp.forEach(a => n += a.length); const f = new Float32Array(n); let o = 0; allWp.forEach(a => { f.set(a, o); o += a.length; }); return f; })();
+/** Depth of the body surface at (x, y), looking from the front (+z) or rear (-z). */
+function surfaceZ(x, y, front, zMin = -1, zMax = 1) {
+  let best = front ? -Infinity : Infinity;
+  for (let r = 0.004; r < 0.03 && !isFinite(best); r *= 1.8) {
+    for (let i = 0; i < flat.length; i += 3) {
+      const z = flat[i + 2];
+      if (z < zMin || z > zMax) continue;
+      if (Math.abs(flat[i] - x) < r && Math.abs(flat[i + 1] - y) < r) {
+        if (front ? z > best : z < best) best = z;
+      }
+    }
+  }
+  return isFinite(best) ? best : (front ? 0.58 : -0.59);
+}
+/** Quad (corners in x/y, listed TL,TR,BR,BL as seen from outside) subdivided and draped on the surface. */
+function drape(corners, front, nu = 8, nv = 3, zRange = [-1, 1]) {
+  const pos = [], idx = [];
+  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+    const top = lerp(corners[0], corners[1], i / nu), bot = lerp(corners[3], corners[2], i / nu);
+    const [x, y] = lerp(top, bot, j / nv);
+    const z = surfaceZ(x, y, front, zRange[0], zRange[1]);
+    pos.push(x, y, z + (front ? 0.0018 : -0.0018));
+  }
+  for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+    const a = j * (nu + 1) + i, b = a + 1, c = a + nu + 1, d = c + 1;
+    idx.push(a, c, b, b, c, d);
+  }
+  return { pos, idx };
+}
+const mirror = c => c.map(([x, y]) => [-x, y]).reverse().map((p, k, arr) => p);
+function lampNode(name, mat, meshes) {
+  const pos = [], idx = [];
+  for (const m of meshes) { const base = pos.length / 3; pos.push(...m.pos); idx.push(...m.idx.map(k => k + base)); }
+  const prim = doc.createPrimitive().setMaterial(mat)
+    .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array(pos)).setBuffer(buffer))
+    .setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint32Array(idx)).setBuffer(buffer));
+  carNode.addChild(doc.createNode(name).setMesh(doc.createMesh(name).addPrimitive(prim)));
+}
+const both = (c, front, nu, nv, zr) => [drape(c, front, nu, nv, zr), drape(c.map(([x, y]) => [-x, y]), front, nu, nv, zr)];
+const sideOnly = (c, sign, front, nu, nv, zr) => drape(c.map(([x, y]) => [sign * x, y]), front, nu, nv, zr);
+// Headlamps (slanted: outer end higher)
+const HEAD = [[0.122, 0.218], [0.222, 0.244], [0.222, 0.212], [0.122, 0.196]];
+lampNode('lamp_head', MAT.head, both(HEAD, true, 10, 3, [0.3, 1]));
+lampNode('lamp_head_high', MAT.high, both([[0.135, 0.214], [0.205, 0.236], [0.205, 0.218], [0.135, 0.201]], true, 8, 2, [0.3, 1]));
+// Front fog lamps in the lower corner intakes
+lampNode('lamp_fog_front', MAT.fog, both([[0.180, 0.150], [0.205, 0.150], [0.205, 0.118], [0.180, 0.118]], true, 3, 3, [0.3, 1]));
+// Rear: corner tail lamps + the light bar across the tail
+const TAIL = [[0.140, 0.279], [0.228, 0.279], [0.228, 0.250], [0.140, 0.252]];
+const BAR = [[-0.140, 0.277], [0.140, 0.277], [0.140, 0.269], [-0.140, 0.269]];
+lampNode('lamp_tail', MAT.tail, [...both(TAIL, false, 8, 3, [-1, -0.3]), drape(BAR, false, 20, 1, [-1, -0.3])]);
+lampNode('lamp_brake', MAT.brake, [...both([[0.150, 0.276], [0.220, 0.276], [0.220, 0.256], [0.150, 0.257]], false, 6, 2, [-1, -0.3]), drape([[-0.10, 0.276], [0.10, 0.276], [0.10, 0.270], [-0.10, 0.270]], false, 14, 1, [-1, -0.3])]);
+lampNode('lamp_reverse', MAT.white, both([[0.142, 0.262], [0.160, 0.262], [0.160, 0.252], [0.142, 0.253]], false, 2, 1, [-1, -0.3]));
+lampNode('lamp_fog_rear', MAT.tail, [drape([[-0.030, 0.118], [0.030, 0.118], [0.030, 0.108], [-0.030, 0.108]], false, 4, 1, [-1, -0.3])]);
+// Turn signals: outer end of each headlamp, outer part of each tail lamp, and the mirror
+function turnSide(sign) {
+  return [
+    sideOnly([[0.200, 0.242], [0.226, 0.247], [0.226, 0.214], [0.200, 0.210]], sign, true, 3, 3, [0.3, 1]),
+    sideOnly([[0.195, 0.279], [0.230, 0.279], [0.230, 0.250], [0.195, 0.250]], sign, false, 3, 3, [-1, -0.3]),
+    sideOnly([[0.262, 0.286], [0.296, 0.290], [0.296, 0.282], [0.262, 0.279]], sign, true, 3, 1, [0.05, 0.25]),
+  ];
+}
+lampNode('lamp_turn_left', MAT.amber, turnSide(1));     // +x = the car's left
+lampNode('lamp_turn_right', MAT.amber, turnSide(-1));
+// Headlight beams on the ground in front of the car (alpha fades with distance)
+function beam(len, spread, mat, name) {
+  const pos = [], idx = [], col = [];
+  for (const sx of [-1, 1]) {
+    const base = pos.length / 3;
+    const near = [sx * 0.12, sx * 0.22], far = [sx * 0.02, sx * (0.22 + spread)];
+    pos.push(near[0], 0.002, 0.60, near[1], 0.002, 0.60, far[1], 0.002, 0.60 + len, far[0], 0.002, 0.60 + len);
+    col.push(1, 1, 1, 0.38, 1, 1, 1, 0.38, 1, 1, 1, 0, 1, 1, 1, 0);
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  const prim = doc.createPrimitive().setMaterial(mat)
+    .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array(pos)).setBuffer(buffer))
+    .setAttribute('COLOR_0', doc.createAccessor().setType('VEC4').setArray(new Float32Array(col)).setBuffer(buffer))
+    .setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint32Array(idx)).setBuffer(buffer));
+  carNode.addChild(doc.createNode(name).setMesh(doc.createMesh(name).addPrimitive(prim)));
+}
+beam(0.85, 0.22, MAT.beamLow, 'beam_low');
+beam(1.70, 0.30, MAT.beamHigh, 'beam_high');
+console.log('lamps added');
 console.log('triangles per part:', counts);
 
 material.setNormalTexture(null);

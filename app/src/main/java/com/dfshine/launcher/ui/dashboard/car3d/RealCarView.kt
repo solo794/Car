@@ -135,6 +135,7 @@ private class RealCarController(
     private var hood = 0f
     private var steer = 0f
     private var spin = 0f
+    private var blinkClock = 0f
 
     private class Rig(val entity: Int, val base: FloatArray)
     private val rig = HashMap<String, Rig>()
@@ -319,7 +320,26 @@ private class RealCarController(
         pose("sunroof", Mat.mul(Mat.translate(0f, 0.012f * pop, -0.17f * sunOpen), Mat.rotX(0.12f * sunTilt + 0.04f * pop)))
         // The roof skin under the glass is hidden while open so the cabin shows through.
         pose("roof_cutout", Mat.scale(if (sunOpen > 0.02f) 0f else 1f))
+
+        // Lamps: overlays baked into the model on the real lamp surfaces; on/off by scale.
+        val l = s.lights
+        blinkClock = (blinkClock + dt) % 0.84f
+        val blinkOn = blinkClock < 0.42f
+        val head = l.lowBeam || l.highBeam
+        lamp("lamp_head", head || l.position)
+        lamp("lamp_head_high", l.highBeam)
+        lamp("beam_low", head)
+        lamp("beam_high", l.highBeam)
+        lamp("lamp_tail", head || l.position || l.brake)
+        lamp("lamp_brake", l.brake)
+        lamp("lamp_reverse", l.reverse || s.gear == VehicleState.Gear.R)
+        lamp("lamp_fog_front", l.fogFront)
+        lamp("lamp_fog_rear", l.fogRear)
+        lamp("lamp_turn_left", (l.turnLeft || l.hazard) && blinkOn)
+        lamp("lamp_turn_right", (l.turnRight || l.hazard) && blinkOn)
     }
+
+    private fun lamp(name: String, on: Boolean) = pose(name, Mat.scale(if (on) 1f else 0f))
 
     private fun pose(name: String, local: FloatArray) {
         val r = rig[name] ?: return
@@ -356,7 +376,9 @@ private class RealCarController(
         private val RIG_NAMES = listOf(
             "door_fl", "door_fr", "door_rl", "door_rr", "trunk", "hood",
             "steer_fl", "steer_fr", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr",
-            "glass_fl", "glass_fr", "glass_rl", "glass_rr", "sunroof", "roof_cutout"
+            "glass_fl", "glass_fr", "glass_rl", "glass_rr", "sunroof", "roof_cutout",
+            "lamp_head", "lamp_head_high", "beam_low", "beam_high", "lamp_tail", "lamp_brake",
+            "lamp_reverse", "lamp_fog_front", "lamp_fog_rear", "lamp_turn_left", "lamp_turn_right"
         )
         private val GLASS = arrayOf("glass_fl", "glass_fr", "glass_rl", "glass_rr")
         private const val WINDOW_DROP = 0.12f
